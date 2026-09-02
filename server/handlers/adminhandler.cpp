@@ -5,11 +5,12 @@
 #include "../protocol.h"
 
 #include <QCryptographicHash>
+#include <QDebug>
 
 QJsonObject AdminHandler::login(const QString &id, const QJsonObject &data)
 {
     const QString username = data.value("username").toString().trimmed();
-    const QString password = data.value("password").toString();
+    const QString password = data.value("password").toString().trimmed();
 
     if (username.isEmpty() || password.isEmpty()) {
         return Protocol::makeError(id, "INVALID_PARAM", "账号和密码不能为空");
@@ -26,9 +27,13 @@ QJsonObject AdminHandler::login(const QString &id, const QJsonObject &data)
 
     const QJsonObject admin = adminOpt.value();
     const QByteArray hash = QCryptographicHash::hash(password.toUtf8(), QCryptographicHash::Sha256);
-    const QString passwordHash = QString::fromLatin1(hash.toHex());
+    const QString passwordHash = QString::fromLatin1(hash.toHex()).trimmed().toLower();
+    const QString storedHash = admin.value("password_hash").toString().trimmed().toLower();
 
-    if (passwordHash != admin.value("password_hash").toString()) {
+    if (passwordHash != storedHash) {
+        qWarning() << "admin.login hash mismatch for" << username
+                   << "expected len:" << storedHash.size()
+                   << "got len:" << passwordHash.size();
         return Protocol::makeError(id, "UNAUTHORIZED", "账号或密码错误");
     }
 

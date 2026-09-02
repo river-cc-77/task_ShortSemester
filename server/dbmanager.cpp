@@ -18,11 +18,12 @@ DbManager &DbManager::instance()
 QString DbManager::resolveDatabasePath() const
 {
     const QString appDir = QCoreApplication::applicationDirPath();
+    // 优先使用项目根目录 db/charge.db，避免误用 server/db/charge.db 等副本
     const QStringList candidates = {
-        QDir(appDir).filePath("../db/charge.db"),
-        QDir(appDir).filePath("../../db/charge.db"),
         QDir(QDir::currentPath()).filePath("db/charge.db"),
         QDir(QDir::currentPath()).filePath("../db/charge.db"),
+        QDir(appDir).filePath("../db/charge.db"),
+        QDir(appDir).filePath("../../db/charge.db"),
     };
 
     for (const QString &path : candidates) {
@@ -109,11 +110,19 @@ QJsonObject DbManager::createUser(const QString &phone)
 std::optional<QJsonObject> DbManager::findAdminByUsername(const QString &username)
 {
     QSqlQuery query(m_db);
+    // "admin" 加引号，避免个别 SQLite 环境下表名解析异常
     query.prepare(
-        "SELECT id, username, password_hash FROM admin WHERE username = :username");
+        "SELECT id, username, password_hash FROM \"admin\" WHERE username = :username");
     query.bindValue(":username", username);
 
-    if (!query.exec() || !query.next()) {
+    if (!query.exec()) {
+        qWarning() << "findAdminByUsername SQL error:" << query.lastError().text()
+                   << "db:" << m_dbPath;
+        return std::nullopt;
+    }
+    if (!query.next()) {
+        qWarning() << "findAdminByUsername: no row for username" << username
+                   << "db:" << m_dbPath;
         return std::nullopt;
     }
 
