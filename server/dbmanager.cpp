@@ -4,6 +4,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -131,4 +132,103 @@ std::optional<QJsonObject> DbManager::findAdminByUsername(const QString &usernam
     admin["username"] = query.value("username").toString();
     admin["password_hash"] = query.value("password_hash").toString();
     return admin;
+}
+
+QJsonArray DbManager::fetchStations(const QString &keyword)
+{
+    QSqlQuery query(m_db);
+    QString sql =
+        "SELECT s.id, s.name, s.address, s.lat, s.lng, s.price, "
+        "(SELECT COUNT(*) FROM pile p WHERE p.station_id = s.id) AS total_piles, "
+        "(SELECT COUNT(*) FROM pile p WHERE p.station_id = s.id AND p.status = '闲置') AS idle_piles "
+        "FROM station s ";
+
+    if (!keyword.isEmpty()) {
+        sql += "WHERE s.name LIKE :like OR s.address LIKE :like ";
+    }
+    sql += "ORDER BY s.id";
+
+    query.prepare(sql);
+    if (!keyword.isEmpty()) {
+        query.bindValue(":like", "%" + keyword + "%");
+    }
+
+    QJsonArray items;
+    if (!query.exec()) {
+        qWarning() << "fetchStations failed:" << query.lastError().text();
+        return items;
+    }
+
+    while (query.next()) {
+        QJsonObject row;
+        row["id"] = query.value("id").toInt();
+        row["name"] = query.value("name").toString();
+        row["address"] = query.value("address").toString();
+        row["lat"] = query.value("lat").toDouble();
+        row["lng"] = query.value("lng").toDouble();
+        row["price"] = query.value("price").toDouble();
+        row["total_piles"] = query.value("total_piles").toInt();
+        row["idle_piles"] = query.value("idle_piles").toInt();
+        items.append(row);
+    }
+    return items;
+}
+
+std::optional<QJsonObject> DbManager::fetchStationDetail(int stationId)
+{
+    QSqlQuery stationQuery(m_db);
+    stationQuery.prepare(
+        "SELECT id, name, address, lat, lng, price FROM station WHERE id = :id");
+    stationQuery.bindValue(":id", stationId);
+
+    if (!stationQuery.exec() || !stationQuery.next()) {
+        return std::nullopt;
+    }
+
+    QSqlQuery pileQuery(m_db);
+    pileQuery.prepare(
+        "SELECT id, pile_no, type, power_kw, status FROM pile "
+        "WHERE station_id = :station_id ORDER BY pile_no");
+    pileQuery.bindValue(":station_id", stationId);
+
+    int totalPiles = 0;
+    int idlePiles = 0;
+    QJsonArray piles;
+
+    if (pileQuery.exec()) {
+        while (pileQuery.next()) {
+            ++totalPiles;
+            const QString status = pileQuery.value("status").toString();
+            if (status == QStringLiteral("闲置")) {
+                ++idlePiles;
+            }
+
+            QJsonObject pile;
+            pile["id"] = pileQuery.value("id").toInt();
+            pile["pile_no"] = pileQuery.value("pile_no").toString();
+            pile["type"] = pileQuery.value("type").toString();
+            pile["power_kw"] = pileQuery.value("power_kw").toDouble();
+            pile["status"] = status;
+            pile["can_reserve"] = (status == QStringLiteral("闲置"));
+            piles.append(pile);
+        }
+    } else {
+        qWarning() << "fetchStationDetail piles failed:" << pileQuery.lastError().text();
+    }
+
+    QJsonObject station;
+    station["id"] = stationQuery.value("id").toInt();
+    station["name"] = stationQuery.value("name").toString();
+    station["address"] = stationQuery.value("address").toString();
+    station["lat"] = stationQuery.value("lat").toDouble();
+    station["lng"] = stationQuery.value("lng").toDouble();
+    station["price"] = stationQuery.value("price").toDouble();
+    station["online_rate"] = totalPiles > 0
+                                 ? qRound(idlePiles * 1000.0 / totalPiles) / 1000.0
+                                 : 0.0;
+
+    QJsonObject detail;
+    detail["station"] = station;
+    detail["piles"] = piles;
+    return detail;
 }

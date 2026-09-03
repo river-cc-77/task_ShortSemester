@@ -2,6 +2,7 @@
 
 #include "handlers/adminhandler.h"
 #include "handlers/pinghandler.h"
+#include "handlers/stationhandler.h"
 #include "handlers/userhandler.h"
 
 #include <QJsonDocument>
@@ -82,6 +83,7 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
 {
     const QString id = request.value("id").toString();
     const QString cmd = request.value("cmd").toString();
+    const QString token = request.value("token").toString();
     const QJsonObject data = request.value("data").toObject();
 
     if (cmd == "ping") {
@@ -92,6 +94,12 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
     }
     if (cmd == "admin.login") {
         return AdminHandler::login(id, data);
+    }
+    if (cmd == "station.list") {
+        return StationHandler::list(id, token, data);
+    }
+    if (cmd == "station.detail") {
+        return StationHandler::detail(id, token, data);
     }
 
     return makeError(id, "UNKNOWN_CMD", "未知命令: " + cmd);

@@ -14,7 +14,8 @@ SOURCES += \
     dbmanager.cpp \
     handlers/pinghandler.cpp \
     handlers/userhandler.cpp \
-    handlers/adminhandler.cpp
+    handlers/adminhandler.cpp \
+    handlers/stationhandler.cpp
 
 HEADERS += \
     tcpserver.h \
@@ -24,4 +25,5 @@ HEADERS += \
     dbmanager.h \
     handlers/pinghandler.h \
     handlers/userhandler.h \
-    handlers/adminhandler.h
+    handlers/adminhandler.h \
+    handlers/stationhandler.h

@@ -1,12 +1,14 @@
 # charge-server
 
-充电桩平台 Socket 业务服务（第 1 周：P0 命令）。
+充电桩平台 Socket 业务服务（第 1 周 P0 + P1 找桩）。
 
 ## 已实现命令
 
 - `ping`
 - `user.login`
 - `admin.login`
+- `station.list`
+- `station.detail`
 
 协议详见 `../docs/protocal.md`。
 

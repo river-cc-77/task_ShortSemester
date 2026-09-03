@@ -1,6 +1,7 @@
 #ifndef DBMANAGER_H
 #define DBMANAGER_H
 
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QSqlDatabase>
 #include <QString>
@@ -18,6 +19,9 @@ public:
     std::optional<QJsonObject> findUserByPhone(const QString &phone);
     QJsonObject createUser(const QString &phone);
     std::optional<QJsonObject> findAdminByUsername(const QString &username);
+
+    QJsonArray fetchStations(const QString &keyword);
+    std::optional<QJsonObject> fetchStationDetail(int stationId);
 
 private:
     DbManager() = default;
