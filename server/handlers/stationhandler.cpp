@@ -4,22 +4,36 @@
 #include "../dbmanager.h"
 #include "../protocol.h"
 
-#include <QtMath>
-
 #include <QJsonArray>
-
+#include <QtMath>
 #include <algorithm>
 
 namespace {
 
-QJsonObject authError(const QString &id, const QString &token)
+QJsonObject authUser(const QString &id, const QString &token, SessionInfo &session)
 {
-    SessionInfo session;
     if (!AuthManager::instance().validateToken(token, session)) {
         return Protocol::makeError(id, "UNAUTHORIZED", "未登录或 token 无效");
     }
     if (session.role != QStringLiteral("user")) {
         return Protocol::makeError(id, "FORBIDDEN", "需要用户端登录");
+    }
+    if (!DbManager::instance().isOpen()) {
+        return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
+    }
+    return {};
+}
+
+QJsonObject authAdmin(const QString &id, const QString &token, SessionInfo &session)
+{
+    if (!AuthManager::instance().validateToken(token, session)) {
+        return Protocol::makeError(id, "UNAUTHORIZED", "未登录或 token 无效");
+    }
+    if (session.role != QStringLiteral("admin")) {
+        return Protocol::makeError(id, "FORBIDDEN", "需要管理员登录");
+    }
+    if (!DbManager::instance().isOpen()) {
+        return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
     }
     return {};
 }
@@ -43,24 +57,20 @@ double round1(double value)
 
 double onlineRate(int totalPiles, int idlePiles)
 {
-    if (totalPiles <= 0) {
-        return 0.0;
-    }
+    if (totalPiles <= 0) return 0.0;
     return qRound(idlePiles * 1000.0 / totalPiles) / 1000.0;
 }
 
 } // namespace
 
+// ============================================================
+// station.list — 附近充电站列表
+// ============================================================
 QJsonObject StationHandler::list(const QString &id, const QString &token, const QJsonObject &data)
 {
-    const QJsonObject auth = authError(id, token);
-    if (!auth.isEmpty()) {
-        return auth;
-    }
-
-    if (!DbManager::instance().isOpen()) {
-        return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
-    }
+    SessionInfo session;
+    const QJsonObject auth = authUser(id, token, session);
+    if (!auth.isEmpty()) return auth;
 
     if (!data.contains("lat") || !data.contains("lng")) {
         return Protocol::makeError(id, "INVALID_PARAM", "缺少 lat 或 lng");
@@ -100,16 +110,14 @@ QJsonObject StationHandler::list(const QString &id, const QString &token, const 
     return Protocol::makeSuccess(id, responseData);
 }
 
+// ============================================================
+// station.detail — 电站详情
+// ============================================================
 QJsonObject StationHandler::detail(const QString &id, const QString &token, const QJsonObject &data)
 {
-    const QJsonObject auth = authError(id, token);
-    if (!auth.isEmpty()) {
-        return auth;
-    }
-
-    if (!DbManager::instance().isOpen()) {
-        return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
-    }
+    SessionInfo session;
+    const QJsonObject auth = authUser(id, token, session);
+    if (!auth.isEmpty()) return auth;
 
     if (!data.contains("station_id")) {
         return Protocol::makeError(id, "INVALID_PARAM", "缺少 station_id");
@@ -126,4 +134,125 @@ QJsonObject StationHandler::detail(const QString &id, const QString &token, cons
     }
 
     return Protocol::makeSuccess(id, detailOpt.value());
+}
+
+// ============================================================
+// station.admin.list — 管理端电站列表
+// ============================================================
+QJsonObject StationHandler::adminList(const QString &id, const QString &token, const QJsonObject &data)
+{
+    Q_UNUSED(data);
+    SessionInfo session;
+    const QJsonObject auth = authAdmin(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    QJsonObject responseData;
+    responseData["items"] = DbManager::instance().fetchAdminStations();
+    return Protocol::makeSuccess(id, responseData);
+}
+
+// ============================================================
+// station.create — 新增电站
+// ============================================================
+QJsonObject StationHandler::create(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    const QJsonObject auth = authAdmin(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    const QString name = data.value("name").toString().trimmed();
+    const QString address = data.value("address").toString().trimmed();
+    const double lat = data.value("lat").toDouble();
+    const double lng = data.value("lng").toDouble();
+    const double price = data.value("price").toDouble();
+    const int fastCount = data.value("fast_count").toInt(0);
+    const int slowCount = data.value("slow_count").toInt(0);
+
+    if (name.isEmpty() || address.isEmpty()) {
+        return Protocol::makeError(id, "INVALID_PARAM", "站名和地址不能为空");
+    }
+    if (price <= 0) {
+        return Protocol::makeError(id, "INVALID_PARAM", "电价必须大于 0");
+    }
+    if (fastCount <= 0 && slowCount <= 0) {
+        return Protocol::makeError(id, "INVALID_PARAM", "至少需要一个电桩");
+    }
+
+    const int stationId = DbManager::instance().createStation(
+        name, address, lat, lng, price, fastCount, slowCount);
+    if (stationId <= 0) {
+        return Protocol::makeError(id, "DB_ERROR", "创建电站失败");
+    }
+
+    // 写操作日志
+    DbManager::instance().writeOperationLog(
+        session.adminId, QStringLiteral("新增电站"),
+        QStringLiteral("station"), QString::number(stationId),
+        QString("站名: %1, 快充: %2, 慢充: %3").arg(name).arg(fastCount).arg(slowCount));
+
+    QJsonObject responseData;
+    responseData["station_id"] = stationId;
+    responseData["name"] = name;
+    return Protocol::makeSuccess(id, responseData);
+}
+
+// ============================================================
+// station.favorite.add — 收藏电站
+// ============================================================
+QJsonObject StationHandler::favoriteAdd(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    const QJsonObject auth = authUser(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    const int stationId = data.value("station_id").toInt();
+    if (stationId <= 0) {
+        return Protocol::makeError(id, "INVALID_PARAM", "缺少 station_id");
+    }
+
+    if (!DbManager::instance().addFavorite(session.userId, stationId)) {
+        return Protocol::makeError(id, "DB_ERROR", "收藏失败");
+    }
+
+    QJsonObject responseData;
+    responseData["station_id"] = stationId;
+    return Protocol::makeSuccess(id, responseData);
+}
+
+// ============================================================
+// station.favorite.remove — 取消收藏
+// ============================================================
+QJsonObject StationHandler::favoriteRemove(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    const QJsonObject auth = authUser(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    const int stationId = data.value("station_id").toInt();
+    if (stationId <= 0) {
+        return Protocol::makeError(id, "INVALID_PARAM", "缺少 station_id");
+    }
+
+    if (!DbManager::instance().removeFavorite(session.userId, stationId)) {
+        return Protocol::makeError(id, "DB_ERROR", "取消收藏失败");
+    }
+
+    QJsonObject responseData;
+    responseData["station_id"] = stationId;
+    return Protocol::makeSuccess(id, responseData);
+}
+
+// ============================================================
+// station.favorite.list — 收藏列表
+// ============================================================
+QJsonObject StationHandler::favoriteList(const QString &id, const QString &token, const QJsonObject &data)
+{
+    Q_UNUSED(data);
+    SessionInfo session;
+    const QJsonObject auth = authUser(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    QJsonObject responseData;
+    responseData["items"] = DbManager::instance().listFavorites(session.userId);
+    return Protocol::makeSuccess(id, responseData);
 }

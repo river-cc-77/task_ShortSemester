@@ -15,7 +15,10 @@ SOURCES += \
     handlers/pinghandler.cpp \
     handlers/userhandler.cpp \
     handlers/adminhandler.cpp \
-    handlers/stationhandler.cpp
+    handlers/stationhandler.cpp \
+    handlers/orderhandler.cpp \
+    handlers/statshandler.cpp \
+    handlers/announcementhandler.cpp
 
 HEADERS += \
     tcpserver.h \
@@ -26,4 +29,7 @@ HEADERS += \
     handlers/pinghandler.h \
     handlers/userhandler.h \
     handlers/adminhandler.h \
-    handlers/stationhandler.h
+    handlers/stationhandler.h \
+    handlers/orderhandler.h \
+    handlers/statshandler.h \
+    handlers/announcementhandler.h

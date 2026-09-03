@@ -1,7 +1,10 @@
 #include "protocol.h"
 
 #include "handlers/adminhandler.h"
+#include "handlers/announcementhandler.h"
+#include "handlers/orderhandler.h"
 #include "handlers/pinghandler.h"
+#include "handlers/statshandler.h"
 #include "handlers/stationhandler.h"
 #include "handlers/userhandler.h"
 
@@ -86,6 +89,7 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
     const QString token = request.value("token").toString();
     const QJsonObject data = request.value("data").toObject();
 
+    // ===== P0 基础命令 =====
     if (cmd == "ping") {
         return PingHandler::handle(id);
     }
@@ -95,11 +99,83 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
     if (cmd == "admin.login") {
         return AdminHandler::login(id, data);
     }
+
+    // ===== 用户相关 =====
+    if (cmd == "user.profile.update") {
+        return UserHandler::profileUpdate(id, token, data);
+    }
+    if (cmd == "user.recharge") {
+        return UserHandler::recharge(id, token, data);
+    }
+    if (cmd == "user.admin.list") {
+        return UserHandler::adminList(id, token, data);
+    }
+    if (cmd == "user.freeze") {
+        return UserHandler::freeze(id, token, data);
+    }
+
+    // ===== 充电站相关 =====
     if (cmd == "station.list") {
         return StationHandler::list(id, token, data);
     }
     if (cmd == "station.detail") {
         return StationHandler::detail(id, token, data);
+    }
+    if (cmd == "station.admin.list") {
+        return StationHandler::adminList(id, token, data);
+    }
+    if (cmd == "station.create") {
+        return StationHandler::create(id, token, data);
+    }
+    if (cmd == "station.favorite.add") {
+        return StationHandler::favoriteAdd(id, token, data);
+    }
+    if (cmd == "station.favorite.remove") {
+        return StationHandler::favoriteRemove(id, token, data);
+    }
+    if (cmd == "station.favorite.list") {
+        return StationHandler::favoriteList(id, token, data);
+    }
+
+    // ===== 订单与充电流程 =====
+    if (cmd == "order.check_open") {
+        return OrderHandler::checkOpen(id, token, data);
+    }
+    if (cmd == "order.list") {
+        return OrderHandler::list(id, token, data);
+    }
+    if (cmd == "charge.reserve") {
+        return OrderHandler::reserve(id, token, data);
+    }
+    if (cmd == "charge.start") {
+        return OrderHandler::start(id, token, data);
+    }
+    if (cmd == "charge.progress") {
+        return OrderHandler::progress(id, token, data);
+    }
+    if (cmd == "charge.stop") {
+        return OrderHandler::stop(id, token, data);
+    }
+    if (cmd == "charge.settle") {
+        return OrderHandler::settle(id, token, data);
+    }
+
+    // ===== 管理端：电桩 =====
+    if (cmd == "pile.list") {
+        return AdminHandler::pileList(id, token, data);
+    }
+    if (cmd == "pile.restart") {
+        return AdminHandler::pileRestart(id, token, data);
+    }
+
+    // ===== 统计 =====
+    if (cmd == "stats.overview") {
+        return StatsHandler::overview(id, token, data);
+    }
+
+    // ===== 公告 =====
+    if (cmd == "announcement.list") {
+        return AnnouncementHandler::list(id, token, data);
     }
 
     return makeError(id, "UNKNOWN_CMD", "未知命令: " + cmd);
