@@ -98,7 +98,7 @@ qmake6 charge-admin.pro && make -j4
 1. **不要提交** `db/charge.db`（各人生成）
 2. 改接口顺序：**protocal.md → server → client/admin**
 3. 每人只改自己负责的目录，用分支开发后合并到 `main`
-4. 进度表：`TaskArrangement.xls`
+4. 进度表：`TaskArrangement.xlsx`
 
 ## 常见问题
 

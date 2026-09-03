@@ -92,7 +92,7 @@ task_ShortSemester/
 ├── ml/                      # 预测脚本（待开发）
 ├── tools/
 │   └── test_server.py       # P0 协议测试客户端
-└── TaskArrangement.xls      # 需求进度 / 分工表
+└── TaskArrangement.xlsx     # 需求进度 / 分工表
 ```
 
 ---
@@ -315,7 +315,7 @@ qmake6 charge-server.pro && make -j4
 | 分支 | `main` 稳定；个人用 `dev/xxx` 开发后合并 |
 | 协议变更 | 先改 `protocal.md`，再改 server，最后 client/admin |
 | 表结构变更 | 仅组长 / C 修改 `schema.sql`，全组重建 `charge.db` |
-| 进度 | `TaskArrangement.xls` 统一维护 ○ / △ / × |
+| 进度 | `TaskArrangement.xlsx` 统一维护 ○ / △ / × |
 
 ---
 
