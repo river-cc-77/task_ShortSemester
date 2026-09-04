@@ -15,7 +15,8 @@ public:
     bool open();                 // 定位并打开 db/charge.db，开启 WAL + busy_timeout
     bool isOpen() const;
     QString databasePath() const;
-    QSqlDatabase db() const;
+    // 返回内部连接（单例存续期间有效）的引用；Cleaner 持有该引用执行清洗
+    QSqlDatabase &db();
 
 private:
     AdsDatabase() = default;

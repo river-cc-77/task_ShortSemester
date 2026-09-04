@@ -9,8 +9,10 @@ TARGET = ads-collector
 SOURCES += \
     main.cpp \
     adsdatabase.cpp \
-    aggregator.cpp
+    aggregator.cpp \
+    clean.cpp
 
 HEADERS += \
     adsdatabase.h \
-    aggregator.h
+    aggregator.h \
+    clean.h

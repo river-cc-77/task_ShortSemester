@@ -76,7 +76,7 @@ QString AdsDatabase::databasePath() const
     return m_dbPath;
 }
 
-QSqlDatabase AdsDatabase::db() const
+QSqlDatabase &AdsDatabase::db()
 {
     return m_db;
 }

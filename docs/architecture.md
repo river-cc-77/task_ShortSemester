@@ -260,9 +260,11 @@ erDiagram
 
 ### 7.6 数据采集 `collector/`
 
-- 独立 Qt6/C++ 定时任务：启动即回填近 30 天，之后每 60s 重算一次（幂等，单事务）
-- 只读业务表（`charge_order` / `user` / `pile` / `station`），聚合结果写入 `ads_daily_stats`、`ads_station_daily`、`ads_status_snapshot`
-- 目的：把订单 / 电桩状态 / 用户 / 营收统计做成离线分析表，供大屏只读小表，避免直查订单大表压库
+- 独立 Qt6/C++ 定时任务：启动即回填近 30 天，之后每 60s 重算一次（窗口内汇总幂等，单事务）
+- 只读业务表（`charge_order` / `user` / `pile` / `station`），不改写业务数据
+- 先经清洗层（去重/补全/异常过滤）产出订单事实台账 `ads_order_fact` 与问题台账 `ads_order_issue`（内部层），再聚合到对外分析表：`ads_daily_stats`、`ads_station_daily`、`ads_pile_daily`、`ads_hourly_stats`、`ads_station_hourly`、`ads_region_daily`、`ads_status_snapshot`
+- 派生指标（占用利用率/繁忙率/故障率/高峰小时）：运行日按状态快照时间加权；无快照的历史日以当前桩态稳态近似回填，逐日趋势可见
+- 目的：把订单 / 电桩状态 / 用户 / 营收统计做成离线分析表，供大屏只读小表，避免直查订单大表压库；口径详见 `collector/README.md`
 
 ---
 
@@ -345,3 +347,4 @@ qmake6 charge-server.pro && make -j4
 |------|------|------|
 | v0.1 | 2026-09-03 | 初稿：架构、模块、数据模型、部署与协作 |
 | v0.2 | 2026-09-03 | 新增 collector/ 定时采集模块与两张分析表（ads_station_daily、ads_status_snapshot） |
+| v0.3 | 2026-09-04 | collector 扩展为 清洗+多级聚合：ads_order_fact/ads_order_issue 内部台账 + 对外 ads_daily_stats/ads_station_daily/ads_pile_daily/ads_hourly_stats/ads_station_hourly/ads_region_daily/ads_status_snapshot；历史日派生指标现态近似回填 |
