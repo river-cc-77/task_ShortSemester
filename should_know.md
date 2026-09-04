@@ -110,3 +110,6 @@ qmake6 charge-admin.pro && make -j4
 
 **qmake6 不存在**  
 → 尝试 `qmake`，或安装 `qt6-base-dev`。
+
+**GitHub连接被拒绝**
+→没开梯子/尝试切换梯子节点/直接登录GitHub下载zip文件
