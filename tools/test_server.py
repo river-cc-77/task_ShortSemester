@@ -229,28 +229,84 @@ def main() -> int:
         "order.list (admin)",
     )
 
+    # ===== 管理端写操作（此前未覆盖） =====
+    created = run_test(
+        host, port,
+        {"id": "26", "cmd": "station.create", "token": admin_token,
+         "data": {
+             "name": "自动化测试站",
+             "address": "深圳市测试路 1 号",
+             "lat": 22.5,
+             "lng": 114.0,
+             "price": 1.2,
+             "fast_count": 2,
+             "slow_count": 1,
+         }},
+        "station.create",
+    )
+    new_station_id = created["data"]["station_id"]
+
+    admin_stations = run_test(
+        host, port,
+        {"id": "27", "cmd": "station.admin.list", "token": admin_token, "data": {}},
+        "station.admin.list after create",
+    )
+    station_ids = [s["id"] for s in admin_stations["data"]["items"]]
+    if new_station_id not in station_ids:
+        raise RuntimeError("station.create id not found in station.admin.list")
+
+    run_test(
+        host, port,
+        {"id": "28", "cmd": "pile.restart", "token": admin_token,
+         "data": {"pile_no": "SZ001-03"}},
+        "pile.restart",
+    )
+
+    run_test(
+        host, port,
+        {"id": "29", "cmd": "user.freeze", "token": admin_token,
+         "data": {"user_id": 2, "freeze": True}},
+        "user.freeze",
+    )
+    run_test(
+        host, port,
+        {"id": "30", "cmd": "user.login", "data": {"phone": "13800138002"}},
+        "user.login after freeze", expect_ok=False,
+    )
+    run_test(
+        host, port,
+        {"id": "31", "cmd": "user.freeze", "token": admin_token,
+         "data": {"user_id": 2, "freeze": False}},
+        "user.unfreeze",
+    )
+    run_test(
+        host, port,
+        {"id": "32", "cmd": "user.login", "data": {"phone": "13800138002"}},
+        "user.login after unfreeze",
+    )
+
     # ===== 错误处理测试 =====
     run_test(
         host, port,
-        {"id": "26", "cmd": "user.recharge", "token": token, "data": {"amount": -10}},
+        {"id": "33", "cmd": "user.recharge", "token": token, "data": {"amount": -10}},
         "user.recharge invalid amount", expect_ok=False,
     )
 
     run_test(
         host, port,
-        {"id": "27", "cmd": "station.detail", "token": token, "data": {"station_id": 99999}},
+        {"id": "34", "cmd": "station.detail", "token": token, "data": {"station_id": 99999}},
         "station.detail not found", expect_ok=False,
     )
 
     run_test(
         host, port,
-        {"id": "28", "cmd": "unknown.cmd", "token": token, "data": {}},
+        {"id": "35", "cmd": "unknown.cmd", "token": token, "data": {}},
         "unknown cmd", expect_ok=False,
     )
 
     run_test(
         host, port,
-        {"id": "29", "cmd": "user.profile.update", "token": "invalid_token", "data": {}},
+        {"id": "36", "cmd": "user.profile.update", "token": "invalid_token", "data": {}},
         "unauthorized", expect_ok=False,
     )
 
