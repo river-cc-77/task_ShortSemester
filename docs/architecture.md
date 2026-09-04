@@ -88,6 +88,7 @@ task_ShortSemester/
 │   └── handlers/            # 各 cmd 业务实现
 ├── client/                  # 用户端（待开发）
 ├── admin/                   # 管理端（待开发）
+├── collector/               # 大屏数据采集聚合（Qt6/C++ 定时任务）
 ├── dashboard/               # Web 大屏（待开发）
 ├── ml/                      # 预测脚本（待开发）
 ├── tools/
@@ -207,7 +208,9 @@ erDiagram
 | `operation_log` | 管理员操作审计 |
 | `announcement` | 运维公告 |
 | `load_forecast` | ML 写入的负荷预测 |
-| `ads_daily_stats` | 大屏日聚合指标 |
+| `ads_daily_stats` | 平台级日 KPI（collector 定时写入） |
+| `ads_station_daily` | 电站 × 日 营收/电量聚合（collector 定时写入） |
+| `ads_status_snapshot` | 电桩状态周期快照（collector 定时写入） |
 
 ### 6.3 订单状态机
 
@@ -254,6 +257,12 @@ erDiagram
 - 从 `charge_order`、 `pile` 等表提取特征
 - 预测未来 1h / 6h / 24h 负荷，结果写入 `load_forecast`
 - 为用户端推荐与管理端预警提供数据
+
+### 7.6 数据采集 `collector/`
+
+- 独立 Qt6/C++ 定时任务：启动即回填近 30 天，之后每 60s 重算一次（幂等，单事务）
+- 只读业务表（`charge_order` / `user` / `pile` / `station`），聚合结果写入 `ads_daily_stats`、`ads_station_daily`、`ads_status_snapshot`
+- 目的：把订单 / 电桩状态 / 用户 / 营收统计做成离线分析表，供大屏只读小表，避免直查订单大表压库
 
 ---
 
@@ -335,3 +344,4 @@ qmake6 charge-server.pro && make -j4
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | v0.1 | 2026-09-03 | 初稿：架构、模块、数据模型、部署与协作 |
+| v0.2 | 2026-09-03 | 新增 collector/ 定时采集模块与两张分析表（ads_station_daily、ads_status_snapshot） |

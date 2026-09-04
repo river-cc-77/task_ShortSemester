@@ -15,6 +15,8 @@ PRAGMA foreign_keys = ON;
 -- 清空旧数据（开发环境可重复导入）
 DELETE FROM load_forecast;
 DELETE FROM ads_daily_stats;
+DELETE FROM ads_station_daily;
+DELETE FROM ads_status_snapshot;
 DELETE FROM announcement;
 DELETE FROM operation_log;
 DELETE FROM favorite_station;

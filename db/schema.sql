@@ -158,13 +158,47 @@ CREATE TABLE IF NOT EXISTS load_forecast (
 CREATE INDEX IF NOT EXISTS idx_forecast_station ON load_forecast (station_id, horizon);
 
 -- ---------------------------------------------------------------------------
--- 大屏聚合快照（定时任务写入，避免大屏频繁扫订单表）
+-- 平台级 日KPI 快照（collector/ 定时任务写入，避免大屏频繁扫订单表）
+-- stat_date 为业务时间（localtime）的自然日
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ads_daily_stats (
     stat_date          TEXT PRIMARY KEY,  -- YYYY-MM-DD
-    total_revenue      REAL NOT NULL DEFAULT 0,
-    total_kwh          REAL NOT NULL DEFAULT 0,
-    order_count        INTEGER NOT NULL DEFAULT 0,
-    active_user_count  INTEGER NOT NULL DEFAULT 0,
-    updated_at         TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    total_revenue      REAL    NOT NULL DEFAULT 0,  -- 当日已完成订单营收
+    total_kwh          REAL    NOT NULL DEFAULT 0,  -- 当日已完成订单充电量
+    order_count        INTEGER NOT NULL DEFAULT 0,  -- 当日已完成订单数
+    active_user_count  INTEGER NOT NULL DEFAULT 0,  -- 当日有已完成订单的去重用户数
+    new_user_count     INTEGER NOT NULL DEFAULT 0,  -- 当日注册用户数
+    total_users        INTEGER NOT NULL DEFAULT 0,  -- 截至当日的累计用户数
+    updated_at         TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+-- ---------------------------------------------------------------------------
+-- 电站 × 日 营收/电量聚合（collector/ 定时任务写入）
+-- 电站排行、按站营收趋势、电桩可用率等图表数据源
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ads_station_daily (
+    station_id INTEGER NOT NULL REFERENCES station (id) ON DELETE CASCADE,
+    stat_date  TEXT    NOT NULL,  -- YYYY-MM-DD
+    orders     INTEGER NOT NULL DEFAULT 0,  -- 该站当日已完成订单数
+    revenue    REAL    NOT NULL DEFAULT 0,  -- 该站当日营收
+    kwh        REAL    NOT NULL DEFAULT 0,  -- 该站当日充电量
+    updated_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY (station_id, stat_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ads_station_date ON ads_station_daily (stat_date);
+
+-- ---------------------------------------------------------------------------
+-- 电桩状态周期快照（collector/ 每采集周期追加一行）
+-- 供大屏展示电桩状态分布、按站可用桩数、日内状态趋势
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ads_status_snapshot (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    snap_time  TEXT NOT NULL,  -- 采集时间 yyyy-MM-dd HH:mm:ss（localtime）
+    station_id INTEGER NOT NULL REFERENCES station (id) ON DELETE CASCADE,
+    status     TEXT NOT NULL,  -- 闲置 | 在用 | 故障 | 预约
+    cnt        INTEGER NOT NULL DEFAULT 0,  -- 该站该状态的桩数
+    CHECK (status IN ('闲置', '在用', '故障', '预约'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_ads_snapshot_time ON ads_status_snapshot (snap_time);
