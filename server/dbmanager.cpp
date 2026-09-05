@@ -10,6 +10,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
+#include <QtMath>
 
 DbManager &DbManager::instance()
 {
@@ -64,6 +65,26 @@ bool DbManager::isOpen() const
 QString DbManager::databasePath() const
 {
     return m_dbPath;
+}
+
+bool DbManager::runInTransaction(const std::function<bool()> &fn)
+{
+    if (!m_db.transaction()) {
+        qWarning() << "Begin transaction failed:" << m_db.lastError().text();
+        return false;
+    }
+
+    if (fn()) {
+        if (m_db.commit()) {
+            return true;
+        }
+        qWarning() << "Commit failed:" << m_db.lastError().text();
+    } else {
+        if (!m_db.rollback()) {
+            qWarning() << "Rollback failed:" << m_db.lastError().text();
+        }
+    }
+    return false;
 }
 
 // ============================================================
@@ -745,53 +766,159 @@ QJsonArray DbManager::fetchOrders(int userId, const QString &status, int limit,
     return items;
 }
 
-std::optional<double> DbManager::settleOrder(const QString &orderNo, int userId)
+std::optional<double> DbManager::settleOrder(const QString &orderNo, int userId, int adminId)
 {
-    auto orderOpt = findOrderByNo(orderNo);
+    const auto orderOpt = findOrderByNo(orderNo);
     if (!orderOpt.has_value()) {
         return std::nullopt;
     }
-    QJsonObject order = orderOpt.value();
+    const QJsonObject order = orderOpt.value();
     const double amount = order.value("amount").toDouble();
     const int orderId = order.value("order_id").toInt();
 
-    // 检查余额
-    auto userOpt = findUserById(userId);
+    const auto userOpt = findUserById(userId);
     if (!userOpt.has_value() || userOpt.value().value("balance").toDouble() < amount) {
-        return std::nullopt; // 余额不足
-    }
-
-    // 扣款
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE user SET balance = balance - :amount WHERE id = :id");
-    query.bindValue(":amount", amount);
-    query.bindValue(":id", userId);
-    if (!query.exec()) {
         return std::nullopt;
     }
 
-    writeWalletLog(userId, -amount, QStringLiteral("充电结算"), orderId);
+    std::optional<double> balanceAfter;
+    const bool ok = runInTransaction([&]() {
+        QSqlQuery query(m_db);
+        query.prepare(
+            "UPDATE user SET balance = balance - :amount "
+            "WHERE id = :id AND balance >= :amount");
+        query.bindValue(":amount", amount);
+        query.bindValue(":id", userId);
+        if (!query.exec() || query.numRowsAffected() == 0) {
+            qWarning() << "settleOrder deduct failed:" << query.lastError().text();
+            return false;
+        }
 
-    // 更新电桩统计
-    const int pileId = order.value("pile_id").toInt();
-    QSqlQuery pileQuery(m_db);
-    pileQuery.prepare(
-        "UPDATE pile SET charge_count = charge_count + 1, "
-        "charge_minutes = charge_minutes + :minutes WHERE id = :id");
-    // 估算充电分钟数
-    const double kwh = order.value("kwh").toDouble();
-    const double powerKw = order.value("power_kw").toDouble();
-    const int minutes = powerKw > 0 ? qRound(kwh / powerKw * 60) : 0;
-    pileQuery.bindValue(":minutes", minutes);
-    pileQuery.bindValue(":id", pileId);
-    pileQuery.exec();
+        if (!writeWalletLog(userId, -amount, QStringLiteral("充电结算"), orderId)) {
+            return false;
+        }
 
-    // 返回新余额
-    auto updatedUser = findUserById(userId);
-    if (updatedUser.has_value()) {
-        return updatedUser.value().value("balance").toDouble();
+        const int pileId = order.value("pile_id").toInt();
+        const double kwh = order.value("kwh").toDouble();
+        const double powerKw = order.value("power_kw").toDouble();
+        const int minutes = powerKw > 0 ? qRound(kwh / powerKw * 60) : 0;
+
+        QSqlQuery pileQuery(m_db);
+        pileQuery.prepare(
+            "UPDATE pile SET charge_count = charge_count + 1, "
+            "charge_minutes = charge_minutes + :minutes WHERE id = :id");
+        pileQuery.bindValue(":minutes", minutes);
+        pileQuery.bindValue(":id", pileId);
+        if (!pileQuery.exec()) {
+            qWarning() << "settleOrder pile stats failed:" << pileQuery.lastError().text();
+            return false;
+        }
+
+        QSqlQuery orderQuery(m_db);
+        orderQuery.prepare(
+            "UPDATE charge_order SET status = :status "
+            "WHERE order_no = :no AND status = :expected");
+        orderQuery.bindValue(":status", QStringLiteral("已完成"));
+        orderQuery.bindValue(":no", orderNo);
+        orderQuery.bindValue(":expected", QStringLiteral("待支付"));
+        if (!orderQuery.exec() || orderQuery.numRowsAffected() == 0) {
+            qWarning() << "settleOrder complete order failed:" << orderQuery.lastError().text();
+            return false;
+        }
+
+        if (adminId > 0) {
+            if (!writeOperationLog(
+                    adminId, QStringLiteral("代结算"),
+                    QStringLiteral("order"), orderNo,
+                    QString("代用户结算订单 %1，金额 %2 元").arg(orderNo).arg(amount))) {
+                return false;
+            }
+        }
+
+        const auto updatedUser = findUserById(userId);
+        if (!updatedUser.has_value()) {
+            return false;
+        }
+        balanceAfter = updatedUser.value().value("balance").toDouble();
+        return true;
+    });
+
+    if (!ok) {
+        return std::nullopt;
     }
-    return std::nullopt;
+    return balanceAfter;
+}
+
+std::optional<QString> DbManager::reservePile(int userId, int stationId, int pileId)
+{
+    std::optional<QString> orderNo;
+    const bool ok = runInTransaction([&]() {
+        const QString created = createOrder(userId, stationId, pileId);
+        if (created.isEmpty()) {
+            return false;
+        }
+
+        QSqlQuery query(m_db);
+        query.prepare(
+            "UPDATE pile SET status = :status, updated_at = datetime('now','localtime') "
+            "WHERE id = :id AND status = :expected");
+        query.bindValue(":status", QStringLiteral("预约"));
+        query.bindValue(":id", pileId);
+        query.bindValue(":expected", QStringLiteral("闲置"));
+        if (!query.exec() || query.numRowsAffected() == 0) {
+            qWarning() << "reservePile update pile failed:" << query.lastError().text();
+            return false;
+        }
+
+        orderNo = created;
+        return true;
+    });
+
+    if (!ok) {
+        return std::nullopt;
+    }
+    return orderNo;
+}
+
+bool DbManager::startCharge(const QString &orderNo, int pileId, const QString &startAt)
+{
+    return runInTransaction([&]() {
+        QSqlQuery orderQuery(m_db);
+        orderQuery.prepare(
+            "UPDATE charge_order SET status = :status, start_at = :start_at "
+            "WHERE order_no = :no AND status = :expected");
+        orderQuery.bindValue(":status", QStringLiteral("充电中"));
+        orderQuery.bindValue(":start_at", startAt);
+        orderQuery.bindValue(":no", orderNo);
+        orderQuery.bindValue(":expected", QStringLiteral("预约"));
+        if (!orderQuery.exec() || orderQuery.numRowsAffected() == 0) {
+            qWarning() << "startCharge update order failed:" << orderQuery.lastError().text();
+            return false;
+        }
+        return updatePileStatus(pileId, QStringLiteral("在用"));
+    });
+}
+
+bool DbManager::stopCharge(const QString &orderNo, int pileId, const QString &endAt,
+                           double kwh, double amount)
+{
+    return runInTransaction([&]() {
+        QSqlQuery orderQuery(m_db);
+        orderQuery.prepare(
+            "UPDATE charge_order SET status = :status, end_at = :end_at, kwh = :kwh, amount = :amount "
+            "WHERE order_no = :no AND status = :expected");
+        orderQuery.bindValue(":status", QStringLiteral("待支付"));
+        orderQuery.bindValue(":end_at", endAt);
+        orderQuery.bindValue(":kwh", kwh);
+        orderQuery.bindValue(":amount", amount);
+        orderQuery.bindValue(":no", orderNo);
+        orderQuery.bindValue(":expected", QStringLiteral("充电中"));
+        if (!orderQuery.exec() || orderQuery.numRowsAffected() == 0) {
+            qWarning() << "stopCharge update order failed:" << orderQuery.lastError().text();
+            return false;
+        }
+        return updatePileStatus(pileId, QStringLiteral("闲置"));
+    });
 }
 
 void DbManager::cancelExpiredReservations()
@@ -811,16 +938,19 @@ void DbManager::cancelExpiredReservations()
     while (query.next()) {
         const QString orderNo = query.value(0).toString();
         const int pileId = query.value(1).toInt();
-        QSqlQuery del(m_db);
-        del.prepare("DELETE FROM charge_order WHERE order_no = :no");
-        del.bindValue(":no", orderNo);
-        if (!del.exec()) {
-            qWarning() << "cancelExpiredReservations delete failed:" << del.lastError().text();
-            continue;
+        const bool ok = runInTransaction([&]() {
+            QSqlQuery del(m_db);
+            del.prepare("DELETE FROM charge_order WHERE order_no = :no AND status = '预约'");
+            del.bindValue(":no", orderNo);
+            if (!del.exec() || del.numRowsAffected() == 0) {
+                qWarning() << "cancelExpiredReservations delete failed:" << del.lastError().text();
+                return false;
+            }
+            return updatePileStatus(pileId, QStringLiteral("闲置"));
+        });
+        if (ok) {
+            qInfo() << "预约超时自动取消:" << orderNo;
         }
-        // 电桩恢复"闲置"
-        updatePileStatus(pileId, QStringLiteral("闲置"));
-        qInfo() << "预约超时自动取消:" << orderNo;
     }
 }
 
@@ -1044,7 +1174,7 @@ QJsonArray DbManager::fetchForecasts(const QString &horizon, int stationId)
 // 日志
 // ============================================================
 
-void DbManager::writeOperationLog(int adminId, const QString &action,
+bool DbManager::writeOperationLog(int adminId, const QString &action,
                                    const QString &targetType, const QString &targetId,
                                    const QString &detail)
 {
@@ -1057,10 +1187,14 @@ void DbManager::writeOperationLog(int adminId, const QString &action,
     query.bindValue(":ttype", targetType);
     query.bindValue(":tid", targetId);
     query.bindValue(":detail", detail);
-    query.exec();
+    if (!query.exec()) {
+        qWarning() << "writeOperationLog failed:" << query.lastError().text();
+        return false;
+    }
+    return true;
 }
 
-void DbManager::writeWalletLog(int userId, double delta, const QString &reason, int orderId)
+bool DbManager::writeWalletLog(int userId, double delta, const QString &reason, int orderId)
 {
     QSqlQuery query(m_db);
     query.prepare(
@@ -1070,5 +1204,9 @@ void DbManager::writeWalletLog(int userId, double delta, const QString &reason, 
     query.bindValue(":delta", delta);
     query.bindValue(":reason", reason);
     query.bindValue(":oid", orderId > 0 ? QVariant(orderId) : QVariant());
-    query.exec();
+    if (!query.exec()) {
+        qWarning() << "writeWalletLog failed:" << query.lastError().text();
+        return false;
+    }
+    return true;
 }
