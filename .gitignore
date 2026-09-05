@@ -78,3 +78,13 @@ desktop.ini
 *.log
 *.tmp
 *.bak
+
+# ---------------------------------------------------------------------------
+# 本地工具脚本（仅保留 test_*.py 纳入版本库）
+# ---------------------------------------------------------------------------
+tools/*
+!tools/test_*.py
+
+# TaskArrangement 原始 Excel 备份（本地参考，不提交）
+TaskArrangement_orig.xls
+TaskArrangement_orig.bin
