@@ -144,6 +144,10 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
     if (cmd == "order.list") {
         return OrderHandler::list(id, token, data);
     }
+    if (cmd == "order.admin.settle") {
+        // 协议 4.18：管理员代结算
+        return OrderHandler::adminSettle(id, token, data);
+    }
     if (cmd == "charge.reserve") {
         return OrderHandler::reserve(id, token, data);
     }
@@ -167,10 +171,24 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
     if (cmd == "pile.restart") {
         return AdminHandler::pileRestart(id, token, data);
     }
+    if (cmd == "pile.update") {
+        // 协议 5.2 P2：修改电桩
+        return AdminHandler::pileUpdate(id, token, data);
+    }
+    if (cmd == "pile.delete") {
+        // 协议 5.2 P2：删除电桩
+        return AdminHandler::pileDelete(id, token, data);
+    }
 
     // ===== 统计 =====
     if (cmd == "stats.overview") {
         return StatsHandler::overview(id, token, data);
+    }
+
+    // ===== 负荷预测 =====
+    if (cmd == "forecast.list") {
+        // 协议 5.3 P2：负荷预测查询（用户端/管理端）
+        return StationHandler::forecastList(id, token, data);
     }
 
     // ===== 公告 =====

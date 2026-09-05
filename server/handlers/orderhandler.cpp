@@ -66,6 +66,9 @@ QJsonObject OrderHandler::checkOpen(const QString &id, const QString &token, con
     const QJsonObject auth = authUser(id, token, session);
     if (!auth.isEmpty()) return auth;
 
+    // 先清理超时预约（预约超 3 小时未开始充电自动取消）
+    DbManager::instance().cancelExpiredReservations();
+
     const auto orderOpt = DbManager::instance().findOpenOrder(session.userId);
 
     QJsonObject responseData;
@@ -127,6 +130,9 @@ QJsonObject OrderHandler::reserve(const QString &id, const QString &token, const
     if (pileNo.isEmpty()) {
         return Protocol::makeError(id, "INVALID_PARAM", "缺少 pile_no");
     }
+
+    // 先清理超时预约（预约超 3 小时未开始充电自动取消，桩恢复闲置）
+    DbManager::instance().cancelExpiredReservations();
 
     // 1. 检查是否有未完成订单
     if (DbManager::instance().findOpenOrder(session.userId).has_value()) {
@@ -328,6 +334,10 @@ QJsonObject OrderHandler::settle(const QString &id, const QString &token, const 
     if (session.role == QStringLiteral("user") && order.value("user_id").toInt() != session.userId) {
         return Protocol::makeError(id, "FORBIDDEN", "无权结算此订单");
     }
+    if (order.value("status").toString() == QStringLiteral("已完成")) {
+        // 重复结算提示
+        return Protocol::makeError(id, "INVALID_PARAM", "订单已结算");
+    }
     if (order.value("status").toString() != QStringLiteral("待支付")) {
         return Protocol::makeError(id, "INVALID_PARAM", "订单状态不允许结算");
     }
@@ -356,4 +366,24 @@ QJsonObject OrderHandler::settle(const QString &id, const QString &token, const 
     responseData["status"] = QStringLiteral("已完成");
     responseData["balance_after"] = balanceOpt.value();
     return Protocol::makeSuccess(id, responseData);
+}
+
+// ============================================================
+// order.admin.settle — 管理员代结算（协议 4.18，P1）
+// 只允许管理员调用；结算逻辑复用 charge.settle（其中 admin 分支已写操作日志）
+// ============================================================
+QJsonObject OrderHandler::adminSettle(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    if (!AuthManager::instance().validateToken(token, session)) {
+        return Protocol::makeError(id, "UNAUTHORIZED", "未登录或 token 无效");
+    }
+    if (session.role != QStringLiteral("admin")) {
+        return Protocol::makeError(id, "FORBIDDEN", "需要管理员登录");
+    }
+    if (!DbManager::instance().isOpen()) {
+        return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
+    }
+    // 与 charge.settle 共用结算逻辑（含"订单已结算"重复结算检查与操作日志）
+    return settle(id, token, data);
 }

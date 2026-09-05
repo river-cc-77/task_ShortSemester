@@ -368,6 +368,17 @@ QJsonArray DbManager::fetchAdminStations()
     return items;
 }
 
+bool DbManager::stationNameExists(const QString &name)
+{
+    QSqlQuery query(m_db);
+    query.prepare("SELECT COUNT(*) FROM station WHERE name = :name");
+    query.bindValue(":name", name);
+    if (!query.exec() || !query.next()) {
+        return false;
+    }
+    return query.value(0).toInt() > 0;
+}
+
 int DbManager::createStation(const QString &name, const QString &address,
                               double lat, double lng, double price,
                               int fastCount, int slowCount)
@@ -504,6 +515,51 @@ bool DbManager::restartPile(const QString &pileNo)
         return false;
     }
     return updatePileStatus(pileOpt.value().value("id").toInt(), QStringLiteral("闲置"));
+}
+
+bool DbManager::updatePile(const QString &pileNo, const QString &type,
+                            double powerKw, const QString &status)
+{
+    QSqlQuery query(m_db);
+    QString sql = "UPDATE pile SET ";
+    QStringList sets;
+    if (!type.isEmpty()) sets << "type = :type";
+    if (powerKw > 0) sets << "power_kw = :power";
+    if (!status.isEmpty()) sets << "status = :status";
+    if (sets.isEmpty()) {
+        return false;
+    }
+    sql += sets.join(", ");
+    sql += ", updated_at = datetime('now','localtime') WHERE pile_no = :no";
+
+    query.prepare(sql);
+    if (!type.isEmpty()) query.bindValue(":type", type);
+    if (powerKw > 0) query.bindValue(":power", powerKw);
+    if (!status.isEmpty()) query.bindValue(":status", status);
+    query.bindValue(":no", pileNo);
+    return query.exec();
+}
+
+bool DbManager::deletePile(const QString &pileNo)
+{
+    QSqlQuery query(m_db);
+    query.prepare("DELETE FROM pile WHERE pile_no = :no");
+    query.bindValue(":no", pileNo);
+    return query.exec();
+}
+
+bool DbManager::pileHasOpenOrders(const QString &pileNo)
+{
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT COUNT(*) FROM charge_order o "
+        "JOIN pile p ON o.pile_id = p.id "
+        "WHERE p.pile_no = :no AND o.status IN ('预约', '充电中', '待支付')");
+    query.bindValue(":no", pileNo);
+    if (!query.exec() || !query.next()) {
+        return false;
+    }
+    return query.value(0).toInt() > 0;
 }
 
 // ============================================================
@@ -738,6 +794,36 @@ std::optional<double> DbManager::settleOrder(const QString &orderNo, int userId)
     return std::nullopt;
 }
 
+void DbManager::cancelExpiredReservations()
+{
+    // 预约超过 3 小时（180 分钟）未开始充电 → 自动取消。
+    // 协议状态机只有 预约/充电中/待支付/已完成 四态，无"已取消"，
+    // 故超时预约直接删除订单行（订单作废），电桩恢复"闲置"。
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT o.order_no, o.pile_id FROM charge_order o "
+        "WHERE o.status = '预约' "
+        "AND (julianday('now','localtime') - julianday(o.reserve_at)) * 1440 >= 180");
+    if (!query.exec()) {
+        qWarning() << "cancelExpiredReservations query failed:" << query.lastError().text();
+        return;
+    }
+    while (query.next()) {
+        const QString orderNo = query.value(0).toString();
+        const int pileId = query.value(1).toInt();
+        QSqlQuery del(m_db);
+        del.prepare("DELETE FROM charge_order WHERE order_no = :no");
+        del.bindValue(":no", orderNo);
+        if (!del.exec()) {
+            qWarning() << "cancelExpiredReservations delete failed:" << del.lastError().text();
+            continue;
+        }
+        // 电桩恢复"闲置"
+        updatePileStatus(pileId, QStringLiteral("闲置"));
+        qInfo() << "预约超时自动取消:" << orderNo;
+    }
+}
+
 // ============================================================
 // 统计
 // ============================================================
@@ -908,6 +994,47 @@ QJsonArray DbManager::fetchAnnouncements()
         row["title"] = query.value("title").toString();
         row["content"] = query.value("content").toString();
         row["created_at"] = query.value("created_at").toString();
+        items.append(row);
+    }
+    return items;
+}
+
+// ============================================================
+// 负荷预测
+// ============================================================
+
+QJsonArray DbManager::fetchForecasts(const QString &horizon, int stationId)
+{
+    // horizon: 1h / 6h / 24h，取自 load_forecast 表（俞莫凡的采集/预测写入）
+    QSqlQuery query(m_db);
+    QString sql =
+        "SELECT f.station_id, s.name AS station_name, f.forecast_hour, "
+        "f.predicted_load, f.predicted_idle_piles, f.created_at "
+        "FROM load_forecast f JOIN station s ON f.station_id = s.id "
+        "WHERE f.horizon = :h ";
+    if (stationId > 0) {
+        sql += "AND f.station_id = :sid ";
+    }
+    sql += "ORDER BY f.station_id, f.forecast_hour";
+
+    query.prepare(sql);
+    query.bindValue(":h", horizon);
+    if (stationId > 0) {
+        query.bindValue(":sid", stationId);
+    }
+
+    QJsonArray items;
+    if (!query.exec()) {
+        qWarning() << "fetchForecasts failed:" << query.lastError().text();
+        return items;
+    }
+    while (query.next()) {
+        QJsonObject row;
+        row["station_id"] = query.value("station_id").toInt();
+        row["station_name"] = query.value("station_name").toString();
+        row["forecast_hour"] = query.value("forecast_hour").toString();
+        row["predicted_load"] = query.value("predicted_load").toDouble();
+        row["predicted_idle_piles"] = query.value("predicted_idle_piles").toInt();
         items.append(row);
     }
     return items;

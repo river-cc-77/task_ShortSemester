@@ -32,6 +32,7 @@ public:
     QJsonArray fetchStations(const QString &keyword);
     std::optional<QJsonObject> fetchStationDetail(int stationId);
     QJsonArray fetchAdminStations();
+    bool stationNameExists(const QString &name);
     int createStation(const QString &name, const QString &address,
                       double lat, double lng, double price,
                       int fastCount, int slowCount);
@@ -41,6 +42,10 @@ public:
     bool updatePileStatus(int pileId, const QString &status);
     QJsonArray fetchPiles(int stationId, const QString &status, const QString &keyword);
     bool restartPile(const QString &pileNo);
+    bool updatePile(const QString &pileNo, const QString &type,
+                    double powerKw, const QString &status);
+    bool deletePile(const QString &pileNo);
+    bool pileHasOpenOrders(const QString &pileNo);
 
     // ===== 订单 =====
     std::optional<QJsonObject> findOpenOrder(int userId);
@@ -55,9 +60,13 @@ public:
                            const QString &dateFrom = QString(),
                            const QString &dateTo = QString());
     std::optional<double> settleOrder(const QString &orderNo, int userId);
+    void cancelExpiredReservations();
 
     // ===== 统计 =====
     QJsonObject fetchStatsOverview(int days);
+
+    // ===== 负荷预测 =====
+    QJsonArray fetchForecasts(const QString &horizon, int stationId);
 
     // ===== 收藏 =====
     bool addFavorite(int userId, int stationId);
