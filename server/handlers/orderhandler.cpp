@@ -56,6 +56,51 @@ void calcCharge(const QJsonObject &order, double &kwh, double &amount,
 
 } // namespace
 
+static QJsonObject settleCore(const QString &id, const SessionInfo &session, const QJsonObject &data)
+{
+    const QString orderNo = data.value("order_no").toString().trimmed();
+    if (orderNo.isEmpty()) {
+        return Protocol::makeError(id, "INVALID_PARAM", "缺少 order_no");
+    }
+
+    const auto orderOpt = DbManager::instance().findOrderByNo(orderNo);
+    if (!orderOpt.has_value()) {
+        return Protocol::makeError(id, "NOT_FOUND", "订单不存在");
+    }
+    const QJsonObject order = orderOpt.value();
+
+    if (session.role == QStringLiteral("user") && order.value("user_id").toInt() != session.userId) {
+        return Protocol::makeError(id, "FORBIDDEN", "无权结算此订单");
+    }
+    if (order.value("status").toString() == QStringLiteral("已完成")) {
+        return Protocol::makeError(id, "INVALID_PARAM", "订单已结算");
+    }
+    if (order.value("status").toString() != QStringLiteral("待支付")) {
+        return Protocol::makeError(id, "INVALID_PARAM", "订单状态不允许结算");
+    }
+
+    const int userId = order.value("user_id").toInt();
+    const auto balanceOpt = DbManager::instance().settleOrder(orderNo, userId);
+    if (!balanceOpt.has_value()) {
+        return Protocol::makeError(id, "BALANCE_NOT_ENOUGH", "余额不足，请先充值");
+    }
+
+    DbManager::instance().updateOrderStatus(orderNo, QStringLiteral("已完成"));
+
+    if (session.role == QStringLiteral("admin")) {
+        DbManager::instance().writeOperationLog(
+            session.adminId, QStringLiteral("代结算"),
+            QStringLiteral("order"), orderNo,
+            QString("代用户结算订单 %1，金额 %2 元").arg(orderNo).arg(order.value("amount").toDouble()));
+    }
+
+    QJsonObject responseData;
+    responseData["order_no"] = orderNo;
+    responseData["status"] = QStringLiteral("已完成");
+    responseData["balance_after"] = balanceOpt.value();
+    return Protocol::makeSuccess(id, responseData);
+}
+
 // ============================================================
 // order.check_open — 检查未完成订单
 // ============================================================
@@ -316,56 +361,9 @@ QJsonObject OrderHandler::stop(const QString &id, const QString &token, const QJ
 QJsonObject OrderHandler::settle(const QString &id, const QString &token, const QJsonObject &data)
 {
     SessionInfo session;
-    const QJsonObject auth = authUser(id, token, session);
+    const QJsonObject auth = authUserOrAdmin(id, token, session);
     if (!auth.isEmpty()) return auth;
-
-    const QString orderNo = data.value("order_no").toString().trimmed();
-    if (orderNo.isEmpty()) {
-        return Protocol::makeError(id, "INVALID_PARAM", "缺少 order_no");
-    }
-
-    const auto orderOpt = DbManager::instance().findOrderByNo(orderNo);
-    if (!orderOpt.has_value()) {
-        return Protocol::makeError(id, "NOT_FOUND", "订单不存在");
-    }
-    const QJsonObject order = orderOpt.value();
-
-    // 用户端只能结算自己的订单；管理端可代结算
-    if (session.role == QStringLiteral("user") && order.value("user_id").toInt() != session.userId) {
-        return Protocol::makeError(id, "FORBIDDEN", "无权结算此订单");
-    }
-    if (order.value("status").toString() == QStringLiteral("已完成")) {
-        // 重复结算提示
-        return Protocol::makeError(id, "INVALID_PARAM", "订单已结算");
-    }
-    if (order.value("status").toString() != QStringLiteral("待支付")) {
-        return Protocol::makeError(id, "INVALID_PARAM", "订单状态不允许结算");
-    }
-
-    const int userId = order.value("user_id").toInt();
-
-    // 执行结算（扣款 + 更新订单状态 + 写流水）
-    const auto balanceOpt = DbManager::instance().settleOrder(orderNo, userId);
-    if (!balanceOpt.has_value()) {
-        return Protocol::makeError(id, "BALANCE_NOT_ENOUGH", "余额不足，请先充值");
-    }
-
-    // 更新订单状态为"已完成"
-    DbManager::instance().updateOrderStatus(orderNo, QStringLiteral("已完成"));
-
-    // 管理端代结算时写操作日志
-    if (session.role == QStringLiteral("admin")) {
-        DbManager::instance().writeOperationLog(
-            session.adminId, QStringLiteral("代结算"),
-            QStringLiteral("order"), orderNo,
-            QString("代用户结算订单 %1，金额 %2 元").arg(orderNo).arg(order.value("amount").toDouble()));
-    }
-
-    QJsonObject responseData;
-    responseData["order_no"] = orderNo;
-    responseData["status"] = QStringLiteral("已完成");
-    responseData["balance_after"] = balanceOpt.value();
-    return Protocol::makeSuccess(id, responseData);
+    return settleCore(id, session, data);
 }
 
 // ============================================================
@@ -384,6 +382,5 @@ QJsonObject OrderHandler::adminSettle(const QString &id, const QString &token, c
     if (!DbManager::instance().isOpen()) {
         return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
     }
-    // 与 charge.settle 共用结算逻辑（含"订单已结算"重复结算检查与操作日志）
-    return settle(id, token, data);
+    return settleCore(id, session, data);
 }

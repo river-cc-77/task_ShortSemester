@@ -7,6 +7,7 @@ import socket
 import struct
 import sys
 import time
+from typing import Optional
 
 
 def send_request(host: str, port: int, payload: dict) -> dict:
@@ -56,6 +57,55 @@ def run_test_error(
     if code != expect_code:
         raise RuntimeError(f"{label} expected {expect_code}, got {code}: {resp}")
     return resp
+
+
+def cleanup_open_order(host: str, port: int, token: str, admin_token: Optional[str] = None) -> None:
+    """Finish or settle leftover orders so tests can repeat without rebuilding db."""
+    resp = send_request(
+        host, port,
+        {"id": "cleanup0", "cmd": "order.check_open", "token": token, "data": {}},
+    )
+    if not resp.get("ok") or not resp.get("data", {}).get("has_open"):
+        return
+
+    order = resp["data"]["order"]
+    order_no = order["order_no"]
+    status = order["status"]
+    print(f"\n>>> cleanup open order {order_no} (status={status})")
+
+    if status == "预约":
+        run_test(
+            host, port,
+            {"id": "cleanup1", "cmd": "charge.start", "token": token,
+             "data": {"order_no": order_no}},
+            "cleanup charge.start",
+        )
+        status = "充电中"
+
+    if status == "充电中":
+        run_test(
+            host, port,
+            {"id": "cleanup2", "cmd": "charge.stop", "token": token,
+             "data": {"order_no": order_no}},
+            "cleanup charge.stop",
+        )
+        status = "待支付"
+
+    if status == "待支付":
+        settle = send_request(
+            host, port,
+            {"id": "cleanup3", "cmd": "charge.settle", "token": token,
+             "data": {"order_no": order_no}},
+        )
+        if not settle.get("ok") and admin_token:
+            run_test(
+                host, port,
+                {"id": "cleanup4", "cmd": "order.admin.settle", "token": admin_token,
+                 "data": {"order_no": order_no}},
+                "cleanup order.admin.settle",
+            )
+        elif not settle.get("ok"):
+            raise RuntimeError(f"cleanup settle failed: {settle}")
 
 
 def main() -> int:
@@ -167,11 +217,15 @@ def main() -> int:
     )
 
     # ===== 订单检查 =====
-    run_test(
+    cleanup_open_order(host, port, token, admin_token)
+
+    open_check = run_test(
         host, port,
         {"id": "14", "cmd": "order.check_open", "token": token, "data": {}},
         "order.check_open (no open)",
     )
+    if open_check["data"].get("has_open"):
+        raise RuntimeError("8001 should have no open order before charge flow")
 
     # ===== 充电全流程 =====
     # 找一个闲置电桩

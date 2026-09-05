@@ -54,6 +54,9 @@ qmake6 charge-server.pro && make -j4
 # Server API 集成测试（约 50 项，含 65s 低余额用例）
 python3 tools/test_server.py
 
+# Server 缺口补测（3h 超时、非法状态、筛选等，约 30s）
+python3 tools/test_server_gaps.py
+
 # Collector 对账测试（需先跑一轮 ads-collector）
 cd collector && ./ads-collector 10
 # 另开终端：

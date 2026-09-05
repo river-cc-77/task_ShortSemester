@@ -60,33 +60,45 @@ def check_daily_reconciliation(cur: sqlite3.Cursor) -> None:
          ORDER BY stat_date
         """,
     )
-    biz_rows = fetch_all(
+    # 与 aggregator 相同口径：读 ads_order_fact 中 excluded=0 的已完成单
+    fact_rows = fetch_all(
         cur,
         """
-        SELECT substr(COALESCE(start_at, created_at), 1, 10) AS d,
-               ROUND(SUM(amount), 2),
-               COUNT(*)
-          FROM charge_order
-         WHERE status = '已完成'
-         GROUP BY d
-         ORDER BY d
+        SELECT stat_date, ROUND(SUM(amount_eff), 2), COUNT(*)
+          FROM ads_order_fact
+         WHERE excluded = 0 AND status = '已完成'
+         GROUP BY stat_date
+         ORDER BY stat_date
         """,
     )
-    biz_map = {r[0]: (r[1], r[2]) for r in biz_rows}
+    fact_map = {r[0]: (r[1], r[2]) for r in fact_rows}
     mismatches = []
     for stat_date, revenue, orders in ads_rows:
-        if stat_date not in biz_map:
+        if stat_date not in fact_map:
             if revenue == 0 and orders == 0:
                 continue
-            mismatches.append(f"{stat_date}: no business rows but ads has data")
+            mismatches.append(f"{stat_date}: no fact rows but ads has data")
             continue
-        biz_rev, biz_cnt = biz_map[stat_date]
-        if abs((revenue or 0) - (biz_rev or 0)) > 0.02 or orders != biz_cnt:
+        fact_rev, fact_cnt = fact_map[stat_date]
+        if abs((revenue or 0) - (fact_rev or 0)) > 0.02 or orders != fact_cnt:
             mismatches.append(
-                f"{stat_date}: ads({revenue},{orders}) vs biz({biz_rev},{biz_cnt})"
+                f"{stat_date}: ads({revenue},{orders}) vs fact({fact_rev},{fact_cnt})"
             )
     if mismatches:
         raise RuntimeError("ads_daily_stats reconciliation failed:\n  " + "\n  ".join(mismatches))
+
+    excluded = fetch_one(
+        cur,
+        """
+        SELECT COUNT(*) FROM ads_order_fact
+         WHERE excluded = 1 AND status = '已完成'
+        """,
+    )[0]
+    if excluded:
+        print(
+            f"  info: {excluded} completed order(s) excluded by cleaner "
+            f"(e.g. zero_unest from instant test charges — expected after test_server.py)"
+        )
     print(f"  OK ads_daily_stats reconciled ({len(ads_rows)} days)")
 
 
