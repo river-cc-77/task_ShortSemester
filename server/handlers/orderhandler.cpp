@@ -80,18 +80,15 @@ static QJsonObject settleCore(const QString &id, const SessionInfo &session, con
     }
 
     const int userId = order.value("user_id").toInt();
-    const auto balanceOpt = DbManager::instance().settleOrder(orderNo, userId);
+    const int adminId = session.role == QStringLiteral("admin") ? session.adminId : 0;
+    const auto balanceOpt = DbManager::instance().settleOrder(orderNo, userId, adminId);
     if (!balanceOpt.has_value()) {
+        const auto userOpt = DbManager::instance().findUserById(userId);
+        if (userOpt.has_value()
+            && userOpt.value().value("balance").toDouble() >= order.value("amount").toDouble()) {
+            return Protocol::makeError(id, "DB_ERROR", "结算失败");
+        }
         return Protocol::makeError(id, "BALANCE_NOT_ENOUGH", "余额不足，请先充值");
-    }
-
-    DbManager::instance().updateOrderStatus(orderNo, QStringLiteral("已完成"));
-
-    if (session.role == QStringLiteral("admin")) {
-        DbManager::instance().writeOperationLog(
-            session.adminId, QStringLiteral("代结算"),
-            QStringLiteral("order"), orderNo,
-            QString("代用户结算订单 %1，金额 %2 元").arg(orderNo).arg(order.value("amount").toDouble()));
     }
 
     QJsonObject responseData;
@@ -198,18 +195,20 @@ QJsonObject OrderHandler::reserve(const QString &id, const QString &token, const
         return Protocol::makeError(id, "PILE_BUSY", "电桩不可用");
     }
 
-    // 3. 创建订单
-    const QString orderNo = DbManager::instance().createOrder(
+    // 3. 创建订单并更新电桩状态（事务）
+    const auto orderNoOpt = DbManager::instance().reservePile(
         session.userId, pile.value("station_id").toInt(), pile.value("id").toInt());
-    if (orderNo.isEmpty()) {
+    if (!orderNoOpt.has_value()) {
+        const auto pileRecheck = DbManager::instance().findPileByNo(pileNo);
+        if (pileRecheck.has_value()
+            && pileRecheck.value().value("status").toString() != QStringLiteral("闲置")) {
+            return Protocol::makeError(id, "PILE_BUSY", "电桩不可用");
+        }
         return Protocol::makeError(id, "DB_ERROR", "创建订单失败");
     }
 
-    // 4. 更新电桩状态为"预约"
-    DbManager::instance().updatePileStatus(pile.value("id").toInt(), QStringLiteral("预约"));
-
     QJsonObject responseData;
-    responseData["order_no"] = orderNo;
+    responseData["order_no"] = orderNoOpt.value();
     responseData["status"] = QStringLiteral("预约");
     return Protocol::makeSuccess(id, responseData);
 }
@@ -242,12 +241,11 @@ QJsonObject OrderHandler::start(const QString &id, const QString &token, const Q
         return Protocol::makeError(id, "INVALID_PARAM", "订单状态不允许开始充电");
     }
 
-    // 更新订单状态为"充电中"，写入开始时间
+    // 更新订单与电桩状态（事务）
     const QString now = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
-    DbManager::instance().updateOrderStatus(orderNo, QStringLiteral("充电中"), now);
-
-    // 更新电桩状态为"在用"
-    DbManager::instance().updatePileStatus(order.value("pile_id").toInt(), QStringLiteral("在用"));
+    if (!DbManager::instance().startCharge(orderNo, order.value("pile_id").toInt(), now)) {
+        return Protocol::makeError(id, "DB_ERROR", "开始充电失败");
+    }
 
     QJsonObject responseData;
     responseData["order_no"] = orderNo;
@@ -339,13 +337,11 @@ QJsonObject OrderHandler::stop(const QString &id, const QString &token, const QJ
     qint64 elapsedSeconds = 0;
     calcCharge(order, kwh, amount, elapsedSeconds);
 
-    // 更新订单状态为"待支付"，写入结束时间和费用
+    // 更新订单与电桩状态（事务）
     const QString now = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
-    DbManager::instance().updateOrderStatus(orderNo, QStringLiteral("待支付"),
-                                             QString(), now, kwh, amount);
-
-    // 更新电桩状态为"闲置"
-    DbManager::instance().updatePileStatus(order.value("pile_id").toInt(), QStringLiteral("闲置"));
+    if (!DbManager::instance().stopCharge(orderNo, order.value("pile_id").toInt(), now, kwh, amount)) {
+        return Protocol::makeError(id, "DB_ERROR", "停止充电失败");
+    }
 
     QJsonObject responseData;
     responseData["order_no"] = orderNo;

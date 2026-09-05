@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QSqlDatabase>
 #include <QString>
+#include <functional>
 #include <optional>
 
 class DbManager
@@ -59,7 +60,11 @@ public:
                            const QString &phone = QString(),
                            const QString &dateFrom = QString(),
                            const QString &dateTo = QString());
-    std::optional<double> settleOrder(const QString &orderNo, int userId);
+    std::optional<double> settleOrder(const QString &orderNo, int userId, int adminId = 0);
+    std::optional<QString> reservePile(int userId, int stationId, int pileId);
+    bool startCharge(const QString &orderNo, int pileId, const QString &startAt);
+    bool stopCharge(const QString &orderNo, int pileId, const QString &endAt,
+                    double kwh, double amount);
     void cancelExpiredReservations();
 
     // ===== 统计 =====
@@ -77,14 +82,15 @@ public:
     QJsonArray fetchAnnouncements();
 
     // ===== 日志 =====
-    void writeOperationLog(int adminId, const QString &action,
+    bool writeOperationLog(int adminId, const QString &action,
                            const QString &targetType = QString(),
                            const QString &targetId = QString(),
                            const QString &detail = QString());
-    void writeWalletLog(int userId, double delta, const QString &reason, int orderId = 0);
+    bool writeWalletLog(int userId, double delta, const QString &reason, int orderId = 0);
 
 private:
     DbManager() = default;
+    bool runInTransaction(const std::function<bool()> &fn);
     QString resolveDatabasePath() const;
 
     QSqlDatabase m_db;
