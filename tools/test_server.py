@@ -6,6 +6,7 @@ import random
 import socket
 import struct
 import sys
+import time
 
 
 def send_request(host: str, port: int, payload: dict) -> dict:
@@ -40,6 +41,20 @@ def run_test(host: str, port: int, req: dict, label: str, expect_ok: bool = True
         raise RuntimeError(f"{label} failed: {resp}")
     if not expect_ok and resp.get("ok"):
         raise RuntimeError(f"{label} should have failed")
+    return resp
+
+
+def run_test_error(
+    host: str, port: int, req: dict, label: str, expect_code: str
+) -> dict:
+    resp = send_request(host, port, req)
+    print(f"\n>>> {label}")
+    print(json.dumps(resp, ensure_ascii=False, indent=2))
+    if resp.get("ok"):
+        raise RuntimeError(f"{label} should have failed")
+    code = resp.get("error", {}).get("code")
+    if code != expect_code:
+        raise RuntimeError(f"{label} expected {expect_code}, got {code}: {resp}")
     return resp
 
 
@@ -89,6 +104,16 @@ def main() -> int:
     distances = [item["distance_km"] for item in items]
     if distances != sorted(distances):
         raise RuntimeError("station.list not sorted by distance")
+
+    keyword_stations = run_test(
+        host, port,
+        {"id": "6a", "cmd": "station.list", "token": token,
+         "data": {"lat": 22.5431, "lng": 114.0579, "keyword": "市民中心"}},
+        "station.list keyword filter",
+    )
+    keyword_items = keyword_stations["data"]["items"]
+    if not any("市民中心" in item.get("name", "") for item in keyword_items):
+        raise RuntimeError("station.list keyword filter returned no match")
 
     station_id = items[0]["id"]
     detail = run_test(
@@ -289,10 +314,137 @@ def main() -> int:
          "data": {"user_id": 2, "freeze": False}},
         "user.unfreeze",
     )
-    run_test(
+    user8002 = run_test(
         host, port,
         {"id": "32", "cmd": "user.login", "data": {"phone": "13800138002"}},
-        "user.login after unfreeze",
+        "user.login 8002 after unfreeze (pending order)",
+    )
+    token8002 = user8002["data"]["token"]
+
+    open_order = run_test(
+        host, port,
+        {"id": "33a", "cmd": "order.check_open", "token": token8002, "data": {}},
+        "order.check_open 8002 pending",
+    )
+    if not open_order["data"].get("has_open"):
+        raise RuntimeError("8002 should have open order")
+    if open_order["data"]["order"]["status"] != "待支付":
+        raise RuntimeError("8002 open order should be 待支付")
+    pending_order_no = open_order["data"]["order"]["order_no"]
+
+    run_test_error(
+        host, port,
+        {"id": "33b", "cmd": "charge.reserve", "token": token8002,
+         "data": {"pile_no": "SZ005-01"}},
+        "charge.reserve ORDER_EXISTS (8002 pending)",
+        "ORDER_EXISTS",
+    )
+
+    run_test_error(
+        host, port,
+        {"id": "33c", "cmd": "charge.settle", "token": token,
+         "data": {"order_no": pending_order_no}},
+        "charge.settle FORBIDDEN (8001 on 8002 order)",
+        "FORBIDDEN",
+    )
+
+    run_test_error(
+        host, port,
+        {"id": "33d", "cmd": "charge.reserve", "token": token,
+         "data": {"pile_no": "SZ001-03"}},
+        "charge.reserve PILE_FAULT",
+        "PILE_FAULT",
+    )
+
+    user8003 = run_test(
+        host, port,
+        {"id": "33e", "cmd": "user.login", "data": {"phone": "13800138003"}},
+        "user.login 8003",
+    )
+    token8003 = user8003["data"]["token"]
+    busy_pile_no = "SZ005-04"
+    busy_reserve = run_test(
+        host, port,
+        {"id": "33f", "cmd": "charge.reserve", "token": token8003,
+         "data": {"pile_no": busy_pile_no}},
+        "charge.reserve 8003 (PILE_BUSY setup)",
+    )
+    busy_order_no = busy_reserve["data"]["order_no"]
+    run_test_error(
+        host, port,
+        {"id": "33g", "cmd": "charge.reserve", "token": token,
+         "data": {"pile_no": busy_pile_no}},
+        "charge.reserve PILE_BUSY",
+        "PILE_BUSY",
+    )
+    run_test(
+        host, port,
+        {"id": "33h", "cmd": "charge.start", "token": token8003,
+         "data": {"order_no": busy_order_no}},
+        "charge.start 8003 cleanup",
+    )
+    run_test(
+        host, port,
+        {"id": "33i", "cmd": "charge.stop", "token": token8003,
+         "data": {"order_no": busy_order_no}},
+        "charge.stop 8003 cleanup",
+    )
+    run_test(
+        host, port,
+        {"id": "33j", "cmd": "charge.settle", "token": token8003,
+         "data": {"order_no": busy_order_no}},
+        "charge.settle 8003 cleanup",
+    )
+
+    run_test_error(
+        host, port,
+        {"id": "33k", "cmd": "stats.overview", "token": token, "data": {"days": 7}},
+        "stats.overview FORBIDDEN (user token)",
+        "FORBIDDEN",
+    )
+
+    run_test_error(
+        host, port,
+        {"id": "33l", "cmd": "user.profile.update", "token": admin_token,
+         "data": {"nickname": "admin-as-user"}},
+        "user.profile.update FORBIDDEN (admin token)",
+        "FORBIDDEN",
+    )
+
+    user8004 = run_test(
+        host, port,
+        {"id": "33m", "cmd": "user.login", "data": {"phone": "13800138004"}},
+        "user.login 8004 (low balance)",
+    )
+    token8004 = user8004["data"]["token"]
+    low_balance_pile = "SZ002-01"
+    low_reserve = run_test(
+        host, port,
+        {"id": "33n", "cmd": "charge.reserve", "token": token8004,
+         "data": {"pile_no": low_balance_pile}},
+        "charge.reserve 8004 (BALANCE_NOT_ENOUGH setup)",
+    )
+    low_order_no = low_reserve["data"]["order_no"]
+    run_test(
+        host, port,
+        {"id": "33o", "cmd": "charge.start", "token": token8004,
+         "data": {"order_no": low_order_no}},
+        "charge.start 8004",
+    )
+    print("\n>>> waiting 65s for charge amount > balance (8004)...")
+    time.sleep(65)
+    run_test(
+        host, port,
+        {"id": "33p", "cmd": "charge.stop", "token": token8004,
+         "data": {"order_no": low_order_no}},
+        "charge.stop 8004",
+    )
+    run_test_error(
+        host, port,
+        {"id": "33q", "cmd": "charge.settle", "token": token8004,
+         "data": {"order_no": low_order_no}},
+        "charge.settle BALANCE_NOT_ENOUGH",
+        "BALANCE_NOT_ENOUGH",
     )
 
     # ===== 新命令测试：P2 补齐 + 边界（协议 4.18 / 5.2 / 5.3） =====

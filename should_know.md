@@ -46,12 +46,18 @@ qmake6 charge-server.pro && make -j4
 
 应看到 `Server listening on port 9000`。
 
-### 5. 测试协议（可选）
+### 5. 自动化测试
 
-另开终端：
+另开终端（server 已启动）：
 
 ```bash
+# Server API 集成测试（约 50 项，含 65s 低余额用例）
 python3 tools/test_server.py
+
+# Collector 对账测试（需先跑一轮 ads-collector）
+cd collector && ./ads-collector 10
+# 另开终端：
+python3 tools/test_collector.py
 ```
 
 ### 6. 启动客户端
@@ -74,24 +80,75 @@ qmake6 charge-admin.pro && make -j4
 
 ## 当前可用 API
 
+完整协议见 `docs/protocal.md`，架构见 `docs/architecture.md`。
+
 | 阶段 | 命令 | 说明 |
 |------|------|------|
-| P0 | `ping` | 连通测试 |
-| P0 | `user.login` | 用户手机号登录 |
-| P0 | `admin.login` | 管理员登录 |
-| P1 | `station.list` | 附近充电站（需用户 token） |
-| P1 | `station.detail` | 电站详情（需用户 token） |
-
-完整协议：`docs/protocal.md`  
-架构说明：`docs/architecture.md`
+| P0 | `ping` / `user.login` / `admin.login` | 连通与登录 |
+| P1 | `station.list` / `station.detail` | 找桩 |
+| P1 | `charge.*` / `order.*` | 预约、充电、结算 |
+| P1 | `user.profile.update` / `user.recharge` | 资料与充值 |
+| P1 | `station.favorite.*` / `announcement.list` | 收藏与公告 |
+| P1 | `station.admin.list` / `station.create` | 管理端电站 |
+| P1 | `pile.list` / `pile.restart` | 管理端电桩 |
+| P1 | `user.admin.list` / `user.freeze` | 管理端用户 |
+| P1 | `stats.overview` / `order.list` | 统计与订单 |
 
 ## 演示账号
 
 | 类型 | 账号 | 密码/说明 |
 |------|------|-----------|
-| 用户 | 13800138001 | 有余额 |
+| 用户 | 13800138001 | 有余额，可正常充电 |
+| 用户 | 13800138002 | 有待支付订单（`order.check_open` 演示） |
+| 用户 | 13800138003 | 普通用户 |
+| 用户 | 13800138004 | 低余额（结算不足演示） |
 | 用户 | 13800138006 | 已冻结 |
 | 管理员 | admin | 123456 |
+
+## 测试清单
+
+### 自动化（`tools/test_server.py`）
+
+| 类别 | 覆盖内容 |
+|------|----------|
+| P0 | ping、用户/管理员登录、错误密码、冻结账号 |
+| 找桩 | 距离排序、`keyword` 过滤、详情、不存在站点 |
+| 充电 | 预约→启动→进度→停止→结算全流程 |
+| 业务规则 | 待支付拦截、ORDER_EXISTS、PILE_FAULT、PILE_BUSY、BALANCE_NOT_ENOUGH、越权 FORBIDDEN |
+| 管理端 | 列表、建站、重启桩、冻结/解冻、统计 |
+| 异常 | 非法充值、未知命令、无效 token |
+
+运行：`python3 tools/test_server.py`（server 监听 9000）
+
+### 自动化（`tools/test_collector.py`）
+
+| 类别 | 覆盖内容 |
+|------|----------|
+| 对账 | `ads_daily_stats` 营收/单量 vs 业务表 |
+| 台账 | `ads_order_fact` 行数与 excluded 分布 |
+| 派生指标 | completion_rate、utilization、peak_hour 等列非空 |
+| 多维表 | station/pile/hour/region 有数据 |
+
+运行前须重建库并跑 collector：`collector/README.md`
+
+### 待实现后补测（代码尚未完成）
+
+| 功能 | 预期测试 |
+|------|----------|
+| 预约超 3h 未启动自动取消 | 改 `reserve_at` 为 3h 前 → 订单作废、桩回闲置、提示「预约已超时，请重新预约」 |
+| `order.admin.settle` | 管理员代结算待支付单 + 写 operation_log |
+| `station.create` 站名重复 | 返回「站名已存在」 |
+| `pile.update` / `pile.delete` | 改桩信息、删闲置桩 |
+| `forecast.list` / `event.push` | 第二阶段 ML 与推送 |
+
+### 手工 / UI 联调
+
+| 模块 | 负责人 | 要点 |
+|------|--------|------|
+| `client/` | 潘尹涛 | 登录、找桩、充电页拦截待支付、断网提示 |
+| `admin/` | 韦迪安 | KPI 图表、建站/冻结 UI、桩重启 |
+| `dashboard/` | 俞莫凡 | 读 `ads_*` 大屏展示 |
+| 并发 | 全员 | server + collector 同时跑，无长时间 locked |
 
 ## 协作规则
 
