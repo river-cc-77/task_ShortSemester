@@ -293,7 +293,7 @@ def main() -> int:
     run_test(
         host, port,
         {"id": "28", "cmd": "pile.restart", "token": admin_token,
-         "data": {"pile_no": "SZ001-03"}},
+         "data": {"pile_no": "SZ002-03"}},
         "pile.restart",
     )
 
