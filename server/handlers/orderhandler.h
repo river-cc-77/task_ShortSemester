@@ -37,6 +37,9 @@ public:
 
     // 结算订单
     static QJsonObject settle(const QString &id, const QString &token, const QJsonObject &data);
+
+    // 管理员代结算（order.admin.settle，协议 4.18）
+    static QJsonObject adminSettle(const QString &id, const QString &token, const QJsonObject &data);
 };
 
 #endif // ORDERHANDLER_H

@@ -2,6 +2,7 @@
 """Test charge-server P0 + P1 commands: user, station, order, charge, admin, stats."""
 
 import json
+import random
 import socket
 import struct
 import sys
@@ -191,6 +192,13 @@ def main() -> int:
             "charge.settle",
         )
 
+        # 重复结算应提示"订单已结算"（需求 NO.15/18）
+        run_test(
+            host, port,
+            {"id": "19b", "cmd": "charge.settle", "token": token, "data": {"order_no": order_no}},
+            "charge.settle duplicate", expect_ok=False,
+        )
+
     # ===== 订单列表 =====
     run_test(
         host, port,
@@ -230,11 +238,13 @@ def main() -> int:
     )
 
     # ===== 管理端写操作（此前未覆盖） =====
+    # 站名带随机后缀，保证测试可重复运行（站名唯一检查）
+    test_station_name = "自动化测试站" + str(random.randint(100, 999))
     created = run_test(
         host, port,
         {"id": "26", "cmd": "station.create", "token": admin_token,
          "data": {
-             "name": "自动化测试站",
+             "name": test_station_name,
              "address": "深圳市测试路 1 号",
              "lat": 22.5,
              "lng": 114.0,
@@ -283,6 +293,147 @@ def main() -> int:
         host, port,
         {"id": "32", "cmd": "user.login", "data": {"phone": "13800138002"}},
         "user.login after unfreeze",
+    )
+
+    # ===== 新命令测试：P2 补齐 + 边界（协议 4.18 / 5.2 / 5.3） =====
+    # 1) 重复站名 → "站名已存在"（需求 NO.29）
+    run_test(
+        host, port,
+        {"id": "37", "cmd": "station.create", "token": admin_token,
+         "data": {
+             "name": test_station_name,
+             "address": "深圳市测试路 2 号",
+             "lat": 22.6,
+             "lng": 114.1,
+             "price": 1.3,
+             "fast_count": 1,
+             "slow_count": 1,
+         }},
+        "station.create duplicate name", expect_ok=False,
+    )
+
+    # 2) pile.update：修改新建站电桩（协议 5.2 P2）
+    pile_list2 = run_test(
+        host, port,
+        {"id": "38", "cmd": "pile.list", "token": admin_token,
+         "data": {"keyword": test_station_name}},
+        "pile.list (new station)",
+    )
+    new_piles = pile_list2["data"]["items"]
+    if len(new_piles) < 1:
+        raise RuntimeError("new station has no piles")
+    target_pile = new_piles[0]["pile_no"]
+    run_test(
+        host, port,
+        {"id": "39", "cmd": "pile.update", "token": admin_token,
+         "data": {"pile_no": target_pile, "power_kw": 120.0}},
+        "pile.update power",
+    )
+    run_test(
+        host, port,
+        {"id": "40", "cmd": "pile.update", "token": admin_token,
+         "data": {"pile_no": target_pile, "type": "直流"}},
+        "pile.update invalid type", expect_ok=False,
+    )
+
+    # 3) pile.delete：删除新建站的空闲桩（协议 5.2 P2）
+    run_test(
+        host, port,
+        {"id": "41", "cmd": "pile.delete", "token": admin_token,
+         "data": {"pile_no": target_pile}},
+        "pile.delete idle pile",
+    )
+
+    # 4) pile.restart 使用中拦截（需求 NO.26）：预约中的桩不可重启
+    idle_pile2 = None
+    for p in piles:
+        if p["status"] == "闲置":
+            idle_pile2 = p
+            break
+    if idle_pile2 is not None:
+        reserve2 = run_test(
+            host, port,
+            {"id": "42", "cmd": "charge.reserve", "token": token,
+             "data": {"pile_no": idle_pile2["pile_no"]}},
+            "charge.reserve (for restart check)",
+        )
+        order2 = reserve2["data"]["order_no"]
+        run_test(
+            host, port,
+            {"id": "43", "cmd": "pile.restart", "token": admin_token,
+             "data": {"pile_no": idle_pile2["pile_no"]}},
+            "pile.restart busy pile", expect_ok=False,
+        )
+        run_test(
+            host, port,
+            {"id": "44", "cmd": "charge.start", "token": token, "data": {"order_no": order2}},
+            "charge.start (for admin settle)",
+        )
+        run_test(
+            host, port,
+            {"id": "45", "cmd": "charge.stop", "token": token, "data": {"order_no": order2}},
+            "charge.stop (for admin settle)",
+        )
+        # 5) order.admin.settle：管理端代结算（协议 4.18 P1）
+        run_test(
+            host, port,
+            {"id": "46", "cmd": "order.admin.settle", "token": admin_token,
+             "data": {"order_no": order2}},
+            "order.admin.settle",
+        )
+
+    # 6) user.freeze 充电中拦截（需求 NO.18/30）
+    idle_pile3 = None
+    for p in piles:
+        if p["status"] == "闲置":
+            idle_pile3 = p
+            break
+    if idle_pile3 is not None:
+        reserve3 = run_test(
+            host, port,
+            {"id": "47", "cmd": "charge.reserve", "token": token,
+             "data": {"pile_no": idle_pile3["pile_no"]}},
+            "charge.reserve (for freeze check)",
+        )
+        order3 = reserve3["data"]["order_no"]
+        run_test(
+            host, port,
+            {"id": "48", "cmd": "charge.start", "token": token, "data": {"order_no": order3}},
+            "charge.start (for freeze check)",
+        )
+        run_test(
+            host, port,
+            {"id": "49", "cmd": "user.freeze", "token": admin_token,
+             "data": {"user_id": 1, "freeze": True}},
+            "user.freeze while charging", expect_ok=False,
+        )
+        run_test(
+            host, port,
+            {"id": "50", "cmd": "charge.stop", "token": token, "data": {"order_no": order3}},
+            "charge.stop cleanup",
+        )
+        run_test(
+            host, port,
+            {"id": "51", "cmd": "charge.settle", "token": token, "data": {"order_no": order3}},
+            "charge.settle cleanup",
+        )
+
+    # 7) forecast.list：负荷预测（协议 5.3 P2）
+    run_test(
+        host, port,
+        {"id": "52", "cmd": "forecast.list", "token": token, "data": {"horizon": "1h"}},
+        "forecast.list (user)",
+    )
+    run_test(
+        host, port,
+        {"id": "53", "cmd": "forecast.list", "token": admin_token,
+         "data": {"horizon": "6h", "station_id": station_id}},
+        "forecast.list (admin)",
+    )
+    run_test(
+        host, port,
+        {"id": "54", "cmd": "forecast.list", "token": token, "data": {"horizon": "2h"}},
+        "forecast.list invalid horizon", expect_ok=False,
     )
 
     # ===== 错误处理测试 =====
