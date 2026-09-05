@@ -15,3 +15,6 @@ HEADERS += \
     apiclient.h \
     loginwindow.h \
     mainwindow.h
+
+FORMS += \
+    mainwindow.ui

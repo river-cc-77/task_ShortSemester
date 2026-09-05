@@ -1,17 +1,21 @@
 #include "apiclient.h"
-
 #include <QJsonDocument>
 #include <QTcpSocket>
+#include <QDebug>
 
 ApiClient::ApiClient(QString host, quint16 port)
     : m_host(std::move(host))
     , m_port(port)
 {
+    if (m_host == "localhost")
+    {
+        m_host = "127.0.0.1";
+    }
 }
 
 void ApiClient::setHost(const QString &host)
 {
-    m_host = host;
+    m_host = (host == "localhost") ? "127.0.0.1" : host;
 }
 
 void ApiClient::setPort(quint16 port)
@@ -38,7 +42,6 @@ QJsonObject ApiClient::call(const QString &cmd, const QJsonObject &data)
     if (!m_token.isEmpty()) {
         request["token"] = m_token;
     }
-
     const QByteArray body = QJsonDocument(request).toJson(QJsonDocument::Compact);
     QByteArray frame(4, Qt::Uninitialized);
     const quint32 length = static_cast<quint32>(body.size());
@@ -49,8 +52,10 @@ QJsonObject ApiClient::call(const QString &cmd, const QJsonObject &data)
     frame.append(body);
 
     QTcpSocket socket;
+    qDebug() << "connect host:" << m_host << " port:" << m_port;
     socket.connectToHost(m_host, m_port);
-    if (!socket.waitForConnected(5000)) {
+    // 超时放大到8秒
+    if (!socket.waitForConnected(8000)) {
         QJsonObject error;
         error["ok"] = false;
         QJsonObject err;
@@ -59,11 +64,9 @@ QJsonObject ApiClient::call(const QString &cmd, const QJsonObject &data)
         error["error"] = err;
         return error;
     }
-
     socket.write(frame);
     socket.waitForBytesWritten(5000);
     socket.waitForReadyRead(5000);
-
     QByteArray buffer = socket.readAll();
     while (buffer.size() < 4 && socket.waitForReadyRead(2000)) {
         buffer.append(socket.readAll());
@@ -77,17 +80,14 @@ QJsonObject ApiClient::call(const QString &cmd, const QJsonObject &data)
         error["error"] = err;
         return error;
     }
-
     const quint32 respLen =
         (static_cast<quint8>(buffer[0]) << 24) |
         (static_cast<quint8>(buffer[1]) << 16) |
         (static_cast<quint8>(buffer[2]) << 8) |
         static_cast<quint8>(buffer[3]);
-
     while (static_cast<quint32>(buffer.size()) < 4 + respLen && socket.waitForReadyRead(2000)) {
         buffer.append(socket.readAll());
     }
-
     const QJsonDocument doc = QJsonDocument::fromJson(buffer.mid(4, static_cast<int>(respLen)));
     if (!doc.isObject()) {
         QJsonObject error;
@@ -98,6 +98,5 @@ QJsonObject ApiClient::call(const QString &cmd, const QJsonObject &data)
         error["error"] = err;
         return error;
     }
-
     return doc.object();
 }
