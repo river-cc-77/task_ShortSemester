@@ -194,10 +194,6 @@ QJsonObject OrderHandler::reserve(const QString &id, const QString &token, const
     if (pileStatus != QStringLiteral("闲置")) {
         return Protocol::makeError(id, "PILE_BUSY", "电桩不可用");
     }
-    // 待支付订单的桩在 UI 上显示「闲置」，但仍不可被他人预约
-    if (DbManager::instance().pileHasOpenOrders(pileNo)) {
-        return Protocol::makeError(id, "PILE_BUSY", "电桩不可用");
-    }
 
     // 3. 创建订单并更新电桩状态（事务）
     const auto orderNoOpt = DbManager::instance().reservePile(

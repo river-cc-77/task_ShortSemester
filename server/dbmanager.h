@@ -47,6 +47,7 @@ public:
                     double powerKw, const QString &status);
     bool deletePile(const QString &pileNo);
     bool pileHasOpenOrders(const QString &pileNo);
+    bool pileHasActiveOrders(const QString &pileNo);
 
     // ===== 订单 =====
     std::optional<QJsonObject> findOpenOrder(int userId);

@@ -595,6 +595,20 @@ bool DbManager::pileHasOpenOrders(const QString &pileNo)
     return query.value(0).toInt() > 0;
 }
 
+bool DbManager::pileHasActiveOrders(const QString &pileNo)
+{
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT COUNT(*) FROM charge_order o "
+        "JOIN pile p ON o.pile_id = p.id "
+        "WHERE p.pile_no = :no AND o.status IN ('预约', '充电中')");
+    query.bindValue(":no", pileNo);
+    if (!query.exec() || !query.next()) {
+        return false;
+    }
+    return query.value(0).toInt() > 0;
+}
+
 // ============================================================
 // 订单
 // ============================================================
@@ -868,7 +882,7 @@ std::optional<QString> DbManager::reservePile(int userId, int stationId, int pil
         QSqlQuery openQuery(m_db);
         openQuery.prepare(
             "SELECT COUNT(*) FROM charge_order "
-            "WHERE pile_id = :pid AND status IN ('预约', '充电中', '待支付')");
+            "WHERE pile_id = :pid AND status IN ('预约', '充电中')");
         openQuery.bindValue(":pid", pileId);
         if (!openQuery.exec() || !openQuery.next()
             || openQuery.value(0).toInt() > 0) {

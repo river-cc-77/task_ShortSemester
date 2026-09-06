@@ -247,8 +247,8 @@ def test_illegal_charge_states(host: str, port: int, token8003: str, token8002: 
     )
 
 
-def test_unpaid_pile_reserve_blocked(host: str, port: int, token8001: str, token8002: str) -> None:
-    print("\n========== C. 待支付桩显示闲置但不可被他人预约 ==========")
+def test_unpaid_pile_still_reservable(host: str, port: int, token8001: str, token8002: str) -> None:
+    print("\n========== C. 待支付时桩仍闲置，他人可预约使用 ==========")
     open8002 = run_test(
         host, port,
         {"id": "C1", "cmd": "order.check_open", "token": token8002, "data": {}},
@@ -270,13 +270,14 @@ def test_unpaid_pile_reserve_blocked(host: str, port: int, token8001: str, token
     if piles.get("SZ001-05", {}).get("status") != "闲置":
         raise RuntimeError("待支付订单的桩在列表中应显示闲置")
 
-    run_test_error(
+    reserve = run_test(
         host, port,
         {"id": "C3", "cmd": "charge.reserve", "token": token8001,
          "data": {"pile_no": "SZ001-05"}},
-        "reserve SZ001-05 blocked by unpaid order",
-        "PILE_BUSY",
+        "8001 reserve SZ001-05 while 8002 unpaid",
     )
+    order_no = reserve["data"]["order_no"]
+    finish_order(host, port, token8001, order_no, None)
 
 
 def test_order_list_filters(host: str, port: int, admin_token: str) -> None:
@@ -473,7 +474,7 @@ def main() -> int:
 
     test_3h_timeout(host, port, token8003)
     test_illegal_charge_states(host, port, token8003, token8002)
-    test_unpaid_pile_reserve_blocked(host, port, token, token8002)
+    test_unpaid_pile_still_reservable(host, port, token, token8002)
     test_order_list_filters(host, port, admin_token)
     test_pile_delete_busy(host, port, token8003, admin_token)
     test_admin_settle_duplicate(host, port, admin_token)
