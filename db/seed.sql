@@ -17,6 +17,12 @@ DELETE FROM load_forecast;
 DELETE FROM ads_daily_stats;
 DELETE FROM ads_station_daily;
 DELETE FROM ads_status_snapshot;
+DELETE FROM ads_order_fact;
+DELETE FROM ads_order_issue;
+DELETE FROM ads_pile_daily;
+DELETE FROM ads_hourly_stats;
+DELETE FROM ads_station_hourly;
+DELETE FROM ads_region_daily;
 DELETE FROM announcement;
 DELETE FROM operation_log;
 DELETE FROM favorite_station;
@@ -182,13 +188,8 @@ INSERT INTO load_forecast (station_id, forecast_hour, predicted_load, predicted_
 (4, '2026-08-29 12:00', 250.0, 4, '24h', '2026-08-28 14:00:00');
 
 -- ---------------------------------------------------------------------------
--- 大屏日聚合（近 7 日营收趋势）
+-- ads_daily_stats 等 ads_* 分析表不再在 seed 预填：统一由 collector 首轮回填生成
+-- （08-22~28 落在 30 天回填窗口内）。原预填仅 5 列且漏 08-28 的待支付单（pending_cnt
+-- 误为 0），与真实口径偏离，故删除。重建库后先运行 collector 再看大屏：
+--   cd collector && ./ads-collector
 -- ---------------------------------------------------------------------------
-INSERT INTO ads_daily_stats (stat_date, total_revenue, total_kwh, order_count, active_user_count) VALUES
-('2026-08-22',  39.12,  32.60, 1, 1),
-('2026-08-23',  58.50,  45.00, 1, 1),
-('2026-08-24',  57.00,  38.00, 1, 1),
-('2026-08-25',  64.00,  40.00, 1, 1),
-('2026-08-26',  38.50,  35.00, 1, 1),
-('2026-08-27',  67.96,  46.60, 2, 2),
-('2026-08-28',  36.00,  30.00, 1, 1);

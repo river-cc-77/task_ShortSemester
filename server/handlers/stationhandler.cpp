@@ -38,6 +38,18 @@ QJsonObject authAdmin(const QString &id, const QString &token, SessionInfo &sess
     return {};
 }
 
+// 用户端或管理端通用鉴权（forecast.list 等命令使用）
+QJsonObject authUserOrAdmin(const QString &id, const QString &token, SessionInfo &session)
+{
+    if (!AuthManager::instance().validateToken(token, session)) {
+        return Protocol::makeError(id, "UNAUTHORIZED", "未登录或 token 无效");
+    }
+    if (!DbManager::instance().isOpen()) {
+        return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
+    }
+    return {};
+}
+
 double haversineKm(double lat1, double lng1, double lat2, double lng2)
 {
     constexpr double kEarthRadiusKm = 6371.0;
@@ -177,6 +189,10 @@ QJsonObject StationHandler::create(const QString &id, const QString &token, cons
     if (fastCount <= 0 && slowCount <= 0) {
         return Protocol::makeError(id, "INVALID_PARAM", "至少需要一个电桩");
     }
+    // 站名唯一性检查（需求 NO.29：站名与已有站重复时提示"站名已存在"，不创建）
+    if (DbManager::instance().stationNameExists(name)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "站名已存在");
+    }
 
     const int stationId = DbManager::instance().createStation(
         name, address, lat, lng, price, fastCount, slowCount);
@@ -254,5 +270,29 @@ QJsonObject StationHandler::favoriteList(const QString &id, const QString &token
 
     QJsonObject responseData;
     responseData["items"] = DbManager::instance().listFavorites(session.userId);
+    return Protocol::makeSuccess(id, responseData);
+}
+
+// ============================================================
+// forecast.list — 负荷预测查询（协议 5.3 P2）
+// 用户端/管理端通用：data { horizon: 1h|6h|24h, station_id?: 可选 }
+// 数据由俞莫凡的采集/预测任务写入 load_forecast 表
+// ============================================================
+QJsonObject StationHandler::forecastList(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    const QJsonObject auth = authUserOrAdmin(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    const QString horizon = data.value("horizon").toString().trimmed();
+    if (horizon != QStringLiteral("1h") && horizon != QStringLiteral("6h")
+            && horizon != QStringLiteral("24h")) {
+        return Protocol::makeError(id, "INVALID_PARAM", "horizon 只能为 1h / 6h / 24h");
+    }
+    const int stationId = data.value("station_id").toInt(0);
+
+    QJsonObject responseData;
+    responseData["horizon"] = horizon;
+    responseData["items"] = DbManager::instance().fetchForecasts(horizon, stationId);
     return Protocol::makeSuccess(id, responseData);
 }

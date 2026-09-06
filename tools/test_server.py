@@ -2,9 +2,12 @@
 """Test charge-server P0 + P1 commands: user, station, order, charge, admin, stats."""
 
 import json
+import random
 import socket
 import struct
 import sys
+import time
+from typing import Optional
 
 
 def send_request(host: str, port: int, payload: dict) -> dict:
@@ -40,6 +43,69 @@ def run_test(host: str, port: int, req: dict, label: str, expect_ok: bool = True
     if not expect_ok and resp.get("ok"):
         raise RuntimeError(f"{label} should have failed")
     return resp
+
+
+def run_test_error(
+    host: str, port: int, req: dict, label: str, expect_code: str
+) -> dict:
+    resp = send_request(host, port, req)
+    print(f"\n>>> {label}")
+    print(json.dumps(resp, ensure_ascii=False, indent=2))
+    if resp.get("ok"):
+        raise RuntimeError(f"{label} should have failed")
+    code = resp.get("error", {}).get("code")
+    if code != expect_code:
+        raise RuntimeError(f"{label} expected {expect_code}, got {code}: {resp}")
+    return resp
+
+
+def cleanup_open_order(host: str, port: int, token: str, admin_token: Optional[str] = None) -> None:
+    """Finish or settle leftover orders so tests can repeat without rebuilding db."""
+    resp = send_request(
+        host, port,
+        {"id": "cleanup0", "cmd": "order.check_open", "token": token, "data": {}},
+    )
+    if not resp.get("ok") or not resp.get("data", {}).get("has_open"):
+        return
+
+    order = resp["data"]["order"]
+    order_no = order["order_no"]
+    status = order["status"]
+    print(f"\n>>> cleanup open order {order_no} (status={status})")
+
+    if status == "预约":
+        run_test(
+            host, port,
+            {"id": "cleanup1", "cmd": "charge.start", "token": token,
+             "data": {"order_no": order_no}},
+            "cleanup charge.start",
+        )
+        status = "充电中"
+
+    if status == "充电中":
+        run_test(
+            host, port,
+            {"id": "cleanup2", "cmd": "charge.stop", "token": token,
+             "data": {"order_no": order_no}},
+            "cleanup charge.stop",
+        )
+        status = "待支付"
+
+    if status == "待支付":
+        settle = send_request(
+            host, port,
+            {"id": "cleanup3", "cmd": "charge.settle", "token": token,
+             "data": {"order_no": order_no}},
+        )
+        if not settle.get("ok") and admin_token:
+            run_test(
+                host, port,
+                {"id": "cleanup4", "cmd": "order.admin.settle", "token": admin_token,
+                 "data": {"order_no": order_no}},
+                "cleanup order.admin.settle",
+            )
+        elif not settle.get("ok"):
+            raise RuntimeError(f"cleanup settle failed: {settle}")
 
 
 def main() -> int:
@@ -88,6 +154,16 @@ def main() -> int:
     distances = [item["distance_km"] for item in items]
     if distances != sorted(distances):
         raise RuntimeError("station.list not sorted by distance")
+
+    keyword_stations = run_test(
+        host, port,
+        {"id": "6a", "cmd": "station.list", "token": token,
+         "data": {"lat": 22.5431, "lng": 114.0579, "keyword": "市民中心"}},
+        "station.list keyword filter",
+    )
+    keyword_items = keyword_stations["data"]["items"]
+    if not any("市民中心" in item.get("name", "") for item in keyword_items):
+        raise RuntimeError("station.list keyword filter returned no match")
 
     station_id = items[0]["id"]
     detail = run_test(
@@ -141,11 +217,15 @@ def main() -> int:
     )
 
     # ===== 订单检查 =====
-    run_test(
+    cleanup_open_order(host, port, token, admin_token)
+
+    open_check = run_test(
         host, port,
         {"id": "14", "cmd": "order.check_open", "token": token, "data": {}},
         "order.check_open (no open)",
     )
+    if open_check["data"].get("has_open"):
+        raise RuntimeError("8001 should have no open order before charge flow")
 
     # ===== 充电全流程 =====
     # 找一个闲置电桩
@@ -191,6 +271,13 @@ def main() -> int:
             "charge.settle",
         )
 
+        # 重复结算应提示"订单已结算"（需求 NO.15/18）
+        run_test(
+            host, port,
+            {"id": "19b", "cmd": "charge.settle", "token": token, "data": {"order_no": order_no}},
+            "charge.settle duplicate", expect_ok=False,
+        )
+
     # ===== 订单列表 =====
     run_test(
         host, port,
@@ -230,11 +317,13 @@ def main() -> int:
     )
 
     # ===== 管理端写操作（此前未覆盖） =====
+    # 站名带随机后缀，保证测试可重复运行（站名唯一检查）
+    test_station_name = "自动化测试站" + str(random.randint(100, 999))
     created = run_test(
         host, port,
         {"id": "26", "cmd": "station.create", "token": admin_token,
          "data": {
-             "name": "自动化测试站",
+             "name": test_station_name,
              "address": "深圳市测试路 1 号",
              "lat": 22.5,
              "lng": 114.0,
@@ -258,7 +347,7 @@ def main() -> int:
     run_test(
         host, port,
         {"id": "28", "cmd": "pile.restart", "token": admin_token,
-         "data": {"pile_no": "SZ001-03"}},
+         "data": {"pile_no": "SZ002-03"}},
         "pile.restart",
     )
 
@@ -279,10 +368,278 @@ def main() -> int:
          "data": {"user_id": 2, "freeze": False}},
         "user.unfreeze",
     )
-    run_test(
+    user8002 = run_test(
         host, port,
         {"id": "32", "cmd": "user.login", "data": {"phone": "13800138002"}},
-        "user.login after unfreeze",
+        "user.login 8002 after unfreeze (pending order)",
+    )
+    token8002 = user8002["data"]["token"]
+
+    open_order = run_test(
+        host, port,
+        {"id": "33a", "cmd": "order.check_open", "token": token8002, "data": {}},
+        "order.check_open 8002 pending",
+    )
+    if not open_order["data"].get("has_open"):
+        raise RuntimeError("8002 should have open order")
+    if open_order["data"]["order"]["status"] != "待支付":
+        raise RuntimeError("8002 open order should be 待支付")
+    pending_order_no = open_order["data"]["order"]["order_no"]
+
+    run_test_error(
+        host, port,
+        {"id": "33b", "cmd": "charge.reserve", "token": token8002,
+         "data": {"pile_no": "SZ005-01"}},
+        "charge.reserve ORDER_EXISTS (8002 pending)",
+        "ORDER_EXISTS",
+    )
+
+    run_test_error(
+        host, port,
+        {"id": "33c", "cmd": "charge.settle", "token": token,
+         "data": {"order_no": pending_order_no}},
+        "charge.settle FORBIDDEN (8001 on 8002 order)",
+        "FORBIDDEN",
+    )
+
+    run_test_error(
+        host, port,
+        {"id": "33d", "cmd": "charge.reserve", "token": token,
+         "data": {"pile_no": "SZ001-03"}},
+        "charge.reserve PILE_FAULT",
+        "PILE_FAULT",
+    )
+
+    user8003 = run_test(
+        host, port,
+        {"id": "33e", "cmd": "user.login", "data": {"phone": "13800138003"}},
+        "user.login 8003",
+    )
+    token8003 = user8003["data"]["token"]
+    busy_pile_no = "SZ005-04"
+    busy_reserve = run_test(
+        host, port,
+        {"id": "33f", "cmd": "charge.reserve", "token": token8003,
+         "data": {"pile_no": busy_pile_no}},
+        "charge.reserve 8003 (PILE_BUSY setup)",
+    )
+    busy_order_no = busy_reserve["data"]["order_no"]
+    run_test_error(
+        host, port,
+        {"id": "33g", "cmd": "charge.reserve", "token": token,
+         "data": {"pile_no": busy_pile_no}},
+        "charge.reserve PILE_BUSY",
+        "PILE_BUSY",
+    )
+    run_test(
+        host, port,
+        {"id": "33h", "cmd": "charge.start", "token": token8003,
+         "data": {"order_no": busy_order_no}},
+        "charge.start 8003 cleanup",
+    )
+    run_test(
+        host, port,
+        {"id": "33i", "cmd": "charge.stop", "token": token8003,
+         "data": {"order_no": busy_order_no}},
+        "charge.stop 8003 cleanup",
+    )
+    run_test(
+        host, port,
+        {"id": "33j", "cmd": "charge.settle", "token": token8003,
+         "data": {"order_no": busy_order_no}},
+        "charge.settle 8003 cleanup",
+    )
+
+    run_test_error(
+        host, port,
+        {"id": "33k", "cmd": "stats.overview", "token": token, "data": {"days": 7}},
+        "stats.overview FORBIDDEN (user token)",
+        "FORBIDDEN",
+    )
+
+    run_test_error(
+        host, port,
+        {"id": "33l", "cmd": "user.profile.update", "token": admin_token,
+         "data": {"nickname": "admin-as-user"}},
+        "user.profile.update FORBIDDEN (admin token)",
+        "FORBIDDEN",
+    )
+
+    user8004 = run_test(
+        host, port,
+        {"id": "33m", "cmd": "user.login", "data": {"phone": "13800138004"}},
+        "user.login 8004 (low balance)",
+    )
+    token8004 = user8004["data"]["token"]
+    low_balance_pile = "SZ002-01"
+    low_reserve = run_test(
+        host, port,
+        {"id": "33n", "cmd": "charge.reserve", "token": token8004,
+         "data": {"pile_no": low_balance_pile}},
+        "charge.reserve 8004 (BALANCE_NOT_ENOUGH setup)",
+    )
+    low_order_no = low_reserve["data"]["order_no"]
+    run_test(
+        host, port,
+        {"id": "33o", "cmd": "charge.start", "token": token8004,
+         "data": {"order_no": low_order_no}},
+        "charge.start 8004",
+    )
+    print("\n>>> waiting 65s for charge amount > balance (8004)...")
+    time.sleep(65)
+    run_test(
+        host, port,
+        {"id": "33p", "cmd": "charge.stop", "token": token8004,
+         "data": {"order_no": low_order_no}},
+        "charge.stop 8004",
+    )
+    run_test_error(
+        host, port,
+        {"id": "33q", "cmd": "charge.settle", "token": token8004,
+         "data": {"order_no": low_order_no}},
+        "charge.settle BALANCE_NOT_ENOUGH",
+        "BALANCE_NOT_ENOUGH",
+    )
+
+    # ===== 新命令测试：P2 补齐 + 边界（协议 4.18 / 5.2 / 5.3） =====
+    # 1) 重复站名 → "站名已存在"（需求 NO.29）
+    run_test(
+        host, port,
+        {"id": "37", "cmd": "station.create", "token": admin_token,
+         "data": {
+             "name": test_station_name,
+             "address": "深圳市测试路 2 号",
+             "lat": 22.6,
+             "lng": 114.1,
+             "price": 1.3,
+             "fast_count": 1,
+             "slow_count": 1,
+         }},
+        "station.create duplicate name", expect_ok=False,
+    )
+
+    # 2) pile.update：修改新建站电桩（协议 5.2 P2）
+    pile_list2 = run_test(
+        host, port,
+        {"id": "38", "cmd": "pile.list", "token": admin_token,
+         "data": {"keyword": test_station_name}},
+        "pile.list (new station)",
+    )
+    new_piles = pile_list2["data"]["items"]
+    if len(new_piles) < 1:
+        raise RuntimeError("new station has no piles")
+    target_pile = new_piles[0]["pile_no"]
+    run_test(
+        host, port,
+        {"id": "39", "cmd": "pile.update", "token": admin_token,
+         "data": {"pile_no": target_pile, "power_kw": 120.0}},
+        "pile.update power",
+    )
+    run_test(
+        host, port,
+        {"id": "40", "cmd": "pile.update", "token": admin_token,
+         "data": {"pile_no": target_pile, "type": "直流"}},
+        "pile.update invalid type", expect_ok=False,
+    )
+
+    # 3) pile.delete：删除新建站的空闲桩（协议 5.2 P2）
+    run_test(
+        host, port,
+        {"id": "41", "cmd": "pile.delete", "token": admin_token,
+         "data": {"pile_no": target_pile}},
+        "pile.delete idle pile",
+    )
+
+    # 4) pile.restart 使用中拦截（需求 NO.26）：预约中的桩不可重启
+    idle_pile2 = None
+    for p in piles:
+        if p["status"] == "闲置":
+            idle_pile2 = p
+            break
+    if idle_pile2 is not None:
+        reserve2 = run_test(
+            host, port,
+            {"id": "42", "cmd": "charge.reserve", "token": token,
+             "data": {"pile_no": idle_pile2["pile_no"]}},
+            "charge.reserve (for restart check)",
+        )
+        order2 = reserve2["data"]["order_no"]
+        run_test(
+            host, port,
+            {"id": "43", "cmd": "pile.restart", "token": admin_token,
+             "data": {"pile_no": idle_pile2["pile_no"]}},
+            "pile.restart busy pile", expect_ok=False,
+        )
+        run_test(
+            host, port,
+            {"id": "44", "cmd": "charge.start", "token": token, "data": {"order_no": order2}},
+            "charge.start (for admin settle)",
+        )
+        run_test(
+            host, port,
+            {"id": "45", "cmd": "charge.stop", "token": token, "data": {"order_no": order2}},
+            "charge.stop (for admin settle)",
+        )
+        # 5) order.admin.settle：管理端代结算（协议 4.18 P1）
+        run_test(
+            host, port,
+            {"id": "46", "cmd": "order.admin.settle", "token": admin_token,
+             "data": {"order_no": order2}},
+            "order.admin.settle",
+        )
+
+    # 6) user.freeze 充电中拦截（需求 NO.18/30）
+    idle_pile3 = None
+    for p in piles:
+        if p["status"] == "闲置":
+            idle_pile3 = p
+            break
+    if idle_pile3 is not None:
+        reserve3 = run_test(
+            host, port,
+            {"id": "47", "cmd": "charge.reserve", "token": token,
+             "data": {"pile_no": idle_pile3["pile_no"]}},
+            "charge.reserve (for freeze check)",
+        )
+        order3 = reserve3["data"]["order_no"]
+        run_test(
+            host, port,
+            {"id": "48", "cmd": "charge.start", "token": token, "data": {"order_no": order3}},
+            "charge.start (for freeze check)",
+        )
+        run_test(
+            host, port,
+            {"id": "49", "cmd": "user.freeze", "token": admin_token,
+             "data": {"user_id": 1, "freeze": True}},
+            "user.freeze while charging", expect_ok=False,
+        )
+        run_test(
+            host, port,
+            {"id": "50", "cmd": "charge.stop", "token": token, "data": {"order_no": order3}},
+            "charge.stop cleanup",
+        )
+        run_test(
+            host, port,
+            {"id": "51", "cmd": "charge.settle", "token": token, "data": {"order_no": order3}},
+            "charge.settle cleanup",
+        )
+
+    # 7) forecast.list：负荷预测（协议 5.3 P2）
+    run_test(
+        host, port,
+        {"id": "52", "cmd": "forecast.list", "token": token, "data": {"horizon": "1h"}},
+        "forecast.list (user)",
+    )
+    run_test(
+        host, port,
+        {"id": "53", "cmd": "forecast.list", "token": admin_token,
+         "data": {"horizon": "6h", "station_id": station_id}},
+        "forecast.list (admin)",
+    )
+    run_test(
+        host, port,
+        {"id": "54", "cmd": "forecast.list", "token": token, "data": {"horizon": "2h"}},
+        "forecast.list invalid horizon", expect_ok=False,
     )
 
     # ===== 错误处理测试 =====

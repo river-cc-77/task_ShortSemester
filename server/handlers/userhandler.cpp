@@ -166,6 +166,17 @@ QJsonObject UserHandler::freeze(const QString &id, const QString &token, const Q
     }
     const bool freeze = data.value("freeze").toBool(false);
 
+    // 需求 NO.18/30：充电中被冻结须先停止并完成结算 → 冻结时拦截充电中订单
+    if (freeze) {
+        const auto openOrder = DbManager::instance().findOpenOrder(userId);
+        if (openOrder.has_value()) {
+            const QString orderStatus = openOrder.value().value("status").toString();
+            if (orderStatus == QStringLiteral("充电中")) {
+                return Protocol::makeError(id, "INVALID_PARAM", "用户充电中，请先停止并完成结算");
+            }
+        }
+    }
+
     if (!DbManager::instance().freezeUser(userId, freeze)) {
         return Protocol::makeError(id, "DB_ERROR", "操作失败");
     }

@@ -163,34 +163,56 @@ CREATE INDEX IF NOT EXISTS idx_forecast_station ON load_forecast (station_id, ho
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ads_daily_stats (
     stat_date          TEXT PRIMARY KEY,  -- YYYY-MM-DD
-    total_revenue      REAL    NOT NULL DEFAULT 0,  -- 当日已完成订单营收
+    total_revenue      REAL    NOT NULL DEFAULT 0,  -- 当日已完成订单营收（清洗有效单）
     total_kwh          REAL    NOT NULL DEFAULT 0,  -- 当日已完成订单充电量
     order_count        INTEGER NOT NULL DEFAULT 0,  -- 当日已完成订单数
     active_user_count  INTEGER NOT NULL DEFAULT 0,  -- 当日有已完成订单的去重用户数
     new_user_count     INTEGER NOT NULL DEFAULT 0,  -- 当日注册用户数
     total_users        INTEGER NOT NULL DEFAULT 0,  -- 截至当日的累计用户数
+    pending_cnt        INTEGER NOT NULL DEFAULT 0,  -- 当日有效"待支付"订单数（终态未结算）
+    completion_rate    REAL    NOT NULL DEFAULT 0,  -- 完成率 = order_count/(order_count+pending_cnt)
+    active_ratio       REAL    NOT NULL DEFAULT 0,  -- 活跃占比 = active_user_count/total_users
+    per_user_orders    REAL    NOT NULL DEFAULT 0,  -- 人均单量 = order_count/active_user_count
+    per_user_kwh       REAL    NOT NULL DEFAULT 0,  -- 人均电量 = total_kwh/active_user_count
+    avg_session_min    REAL    NOT NULL DEFAULT 0,  -- 平均单次有效充电时长（分，已完成单）
+    avg_kwh_order      REAL    NOT NULL DEFAULT 0,  -- 平均单次充电量 = total_kwh/order_count
+    occ_min            REAL    NOT NULL DEFAULT 0,  -- 当日有效占用分钟（时间族，含待支付）
+    utilization        REAL    NOT NULL DEFAULT 0,  -- 订单占用口径利用率 = occ_min/(桩总数×1440)
+    busy_ratio         REAL    NOT NULL DEFAULT 0,  -- 快照口径繁忙率（在用+预约时间加权）
+    fault_rate         REAL    NOT NULL DEFAULT 0,  -- 故障率（快照时间加权；依赖快照累积，无快照日为 0）
+    peak_hour          INTEGER,                    -- 物化峰值小时 0-23；当日无单为 NULL
     updated_at         TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 -- ---------------------------------------------------------------------------
 -- 电站 × 日 营收/电量聚合（collector/ 定时任务写入）
--- 电站排行、按站营收趋势、电桩可用率等图表数据源
+-- 电站排行、按站营收趋势、占用利用率/繁忙率/故障率/周转等图表数据源
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ads_station_daily (
-    station_id INTEGER NOT NULL REFERENCES station (id) ON DELETE CASCADE,
-    stat_date  TEXT    NOT NULL,  -- YYYY-MM-DD
-    orders     INTEGER NOT NULL DEFAULT 0,  -- 该站当日已完成订单数
-    revenue    REAL    NOT NULL DEFAULT 0,  -- 该站当日营收
-    kwh        REAL    NOT NULL DEFAULT 0,  -- 该站当日充电量
-    updated_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    station_id     INTEGER NOT NULL REFERENCES station (id) ON DELETE CASCADE,
+    stat_date      TEXT    NOT NULL,  -- YYYY-MM-DD
+    orders         INTEGER NOT NULL DEFAULT 0,  -- 该站当日已完成订单数
+    revenue        REAL    NOT NULL DEFAULT 0,  -- 该站当日营收
+    kwh            REAL    NOT NULL DEFAULT 0,  -- 该站当日充电量
+    pile_cnt       INTEGER NOT NULL DEFAULT 0,  -- 当日该站桩数（利用率/周转分母，demo 静态取现值）
+    occ_min        REAL    NOT NULL DEFAULT 0,  -- 当日该站有效占用分钟（时间族）
+    utilization    REAL    NOT NULL DEFAULT 0,  -- 占用口径利用率 = occ_min/(pile_cnt×1440)
+    busy_ratio     REAL    NOT NULL DEFAULT 0,  -- 快照口径繁忙率
+    fault_rate     REAL    NOT NULL DEFAULT 0,  -- 故障率（快照时间加权；无快照日为 0）
+    avg_session_min REAL   NOT NULL DEFAULT 0,  -- 平均单次有效充电时长（分）
+    turnover       REAL    NOT NULL DEFAULT 0,  -- 桩日周转 = orders/pile_cnt
+    peak_hour      INTEGER,                     -- 物化峰值小时；当日无单为 NULL
+    updated_at     TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     PRIMARY KEY (station_id, stat_date)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ads_station_date ON ads_station_daily (stat_date);
 
 -- ---------------------------------------------------------------------------
--- 电桩状态周期快照（collector/ 每采集周期追加一行）
--- 供大屏展示电桩状态分布、按站可用桩数、日内状态趋势
+-- 电桩状态周期快照（collector/ 每采集周期按 站×状态 追加多条）
+-- 供大屏展示电桩状态分布、按站可用桩数、日内状态趋势。
+-- 时序累积，仅保留回填窗口内的快照（窗口外由聚合器定期清理，不影响已物化日表）；
+-- (snap_time, station_id, status) 唯一，同刻同站同态重复写入被 INSERT OR IGNORE 幂等忽略。
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ads_status_snapshot (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -198,7 +220,128 @@ CREATE TABLE IF NOT EXISTS ads_status_snapshot (
     station_id INTEGER NOT NULL REFERENCES station (id) ON DELETE CASCADE,
     status     TEXT NOT NULL,  -- 闲置 | 在用 | 故障 | 预约
     cnt        INTEGER NOT NULL DEFAULT 0,  -- 该站该状态的桩数
-    CHECK (status IN ('闲置', '在用', '故障', '预约'))
+    CHECK (status IN ('闲置', '在用', '故障', '预约')),
+    UNIQUE (snap_time, station_id, status)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ads_snapshot_time ON ads_status_snapshot (snap_time);
+
+-- ---------------------------------------------------------------------------
+-- 清洗后订单事实台账（collector/clean 阶段写入，collector 内部中间层，非对外 KPI）
+-- 每个归属日在回填窗口内的业务订单一行（含异常单；窗外订单仅参与去重登记不落表），
+-- 带 清洗/补全/归属 标记；所有订单族指标统一读它，
+-- 保证"去重+补全+过滤"只做一次、口径唯一。绝不回写业务表。
+-- 归属时钟：统计日/小时 = start_at（充电真实发生时刻），缺失回退 end_at -> created_at。
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ads_order_fact (
+    order_id       INTEGER PRIMARY KEY,  -- 镜像 charge_order.id
+    order_no       TEXT    NOT NULL,     -- 订单号（用于去重审计）
+    user_id        INTEGER NOT NULL,
+    station_id     INTEGER NOT NULL,
+    pile_id        INTEGER NOT NULL,
+    status         TEXT    NOT NULL,     -- 预约 | 充电中 | 待支付 | 已完成（原样保留）
+    stat_date      TEXT    NOT NULL,     -- 统一归属自然日 YYYY-MM-DD
+    stat_hour      INTEGER NOT NULL,     -- 统一归属小时 0-23
+    start_ts       TEXT,                 -- 原始 start_at（审计）
+    end_ts         TEXT,                 -- 原始 end_at（审计）
+    duration_min   REAL    NOT NULL DEFAULT 0,  -- 有效充电时长(分)；时间倒挂/缺时间为 0
+    kwh_orig       REAL    NOT NULL DEFAULT 0,  -- 业务表原始电量
+    amount_orig    REAL    NOT NULL DEFAULT 0,  -- 业务表原始金额
+    kwh_eff        REAL    NOT NULL DEFAULT 0,  -- 有效电量（补全/估算后）
+    amount_eff     REAL    NOT NULL DEFAULT 0,  -- 有效金额
+    est_source     TEXT    NOT NULL DEFAULT '', -- 补全来源：''|'price'|'amount'|'power'(可组合)
+    region         TEXT    NOT NULL DEFAULT '', -- 站所属区域快照（如 福田区；提取失败为'未知'）
+    excluded       INTEGER NOT NULL DEFAULT 0,  -- 1=剔除出所有对外指标
+    exclude_code   TEXT,                       -- 剔除原因：dup/fk_missing/negative/time_invalid/
+                                               -- future_ts/zero_unest/stale_reserve/stale_charging
+    warn_code      TEXT    NOT NULL DEFAULT '',-- 逗号分隔，仅标记仍入指标：near_dup/est/price_suspect
+    ts_flag        INTEGER NOT NULL DEFAULT 0, -- 1=归属时钟用了回退（start 缺失）
+    ts_missing     INTEGER NOT NULL DEFAULT 0, -- 1=已完成/待支付缺 start/end，不得进时间族
+    raw_created_at TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_date_status ON ads_order_fact (stat_date, status);
+CREATE INDEX IF NOT EXISTS idx_fact_pile_date  ON ads_order_fact (pile_id, stat_date);
+CREATE INDEX IF NOT EXISTS idx_fact_station    ON ads_order_fact (station_id, stat_date);
+CREATE INDEX IF NOT EXISTS idx_fact_region     ON ads_order_fact (region, stat_date);
+
+-- ---------------------------------------------------------------------------
+-- 清洗问题台账（collector/clean 阶段写入，内部审计，不参与指标计算）
+-- 每单每个问题一行，供核对去重/补全/剔除等预处理效果。
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ads_order_issue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_no    TEXT NOT NULL,
+    issue_code  TEXT NOT NULL,      -- 与 fact 的 exclude_code / warn_code 一致
+    issue_level TEXT NOT NULL,      -- exclude | warn
+    detail      TEXT NOT NULL DEFAULT '',
+    detected_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_issue_level ON ads_order_issue (issue_level);
+
+-- ---------------------------------------------------------------------------
+-- 桩 × 日：单桩服务单量与占用利用率（collector 定时写入）
+-- utilization = duration_min/1440（钳位 ≤1）；行按 桩 × 窗口日 全量铺开（静默日填 0）
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ads_pile_daily (
+    pile_id      INTEGER NOT NULL REFERENCES pile (id) ON DELETE CASCADE,
+    stat_date    TEXT    NOT NULL,  -- YYYY-MM-DD
+    orders       INTEGER NOT NULL DEFAULT 0,  -- 当日服务单数（已完成+待支付且有效，时间族）
+    kwh          REAL    NOT NULL DEFAULT 0,  -- 当日该桩充电量（时间族有效电量）
+    duration_min REAL    NOT NULL DEFAULT 0,  -- 当日占用分钟
+    utilization  REAL    NOT NULL DEFAULT 0,  -- 占用利用率（0~1）
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY (pile_id, stat_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ads_pile_date ON ads_pile_daily (stat_date);
+
+-- ---------------------------------------------------------------------------
+-- 平台 × 小时：订单量/电量/时长小时分布（高峰定位、时段分析）
+-- 近似口径：整单 kwh/时长归属 start 小时，跨多小时的会话只计首小时（demo 单次 <1h 影响可忽略）
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ads_hourly_stats (
+    stat_date    TEXT    NOT NULL,  -- YYYY-MM-DD
+    stat_hour    INTEGER NOT NULL,  -- 0-23
+    orders       INTEGER NOT NULL DEFAULT 0,  -- 已完成有效单数
+    revenue      REAL    NOT NULL DEFAULT 0,
+    kwh          REAL    NOT NULL DEFAULT 0,
+    duration_min REAL    NOT NULL DEFAULT 0,  -- 已完成有效占用分钟
+    active_users INTEGER NOT NULL DEFAULT 0,
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY (stat_date, stat_hour)
+);
+
+-- ---------------------------------------------------------------------------
+-- 站 × 小时：每站高峰/站内时段（同上近似口径）
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ads_station_hourly (
+    station_id   INTEGER NOT NULL REFERENCES station (id) ON DELETE CASCADE,
+    stat_date    TEXT    NOT NULL,
+    stat_hour    INTEGER NOT NULL,
+    orders       INTEGER NOT NULL DEFAULT 0,
+    revenue      REAL    NOT NULL DEFAULT 0,
+    kwh          REAL    NOT NULL DEFAULT 0,
+    duration_min REAL    NOT NULL DEFAULT 0,
+    active_users INTEGER NOT NULL DEFAULT 0,
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY (station_id, stat_date, stat_hour)
+);
+
+-- ---------------------------------------------------------------------------
+-- 区域 × 日：由 station.address 文本提取"XX区"分组（福田区/南山区/宝安区…）
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ads_region_daily (
+    region       TEXT    NOT NULL,  -- 区域名；未知区归 '未知'
+    stat_date    TEXT    NOT NULL,  -- YYYY-MM-DD
+    orders       INTEGER NOT NULL DEFAULT 0,
+    revenue      REAL    NOT NULL DEFAULT 0,
+    kwh          REAL    NOT NULL DEFAULT 0,
+    active_users INTEGER NOT NULL DEFAULT 0,
+    station_cnt  INTEGER NOT NULL DEFAULT 0,  -- 当日有单的区域电站数
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY (region, stat_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ads_region_date ON ads_region_daily (stat_date);

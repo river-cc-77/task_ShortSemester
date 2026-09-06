@@ -27,6 +27,9 @@ public:
 
     // 用户端：收藏列表
     static QJsonObject favoriteList(const QString &id, const QString &token, const QJsonObject &data);
+
+    // 负荷预测查询（forecast.list，协议 5.3，用户端/管理端通用）
+    static QJsonObject forecastList(const QString &id, const QString &token, const QJsonObject &data);
 };
 
 #endif // STATIONHANDLER_H
