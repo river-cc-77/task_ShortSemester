@@ -113,6 +113,35 @@ def find_idle_pile(host: str, port: int, token: str) -> str:
     raise RuntimeError("no idle pile found for transaction test")
 
 
+def _order_amount(db: Path, order_no: str, order: dict) -> float:
+    amount = order.get("amount")
+    if amount is not None and float(amount) > 0:
+        return float(amount)
+    return float(db_query_scalar(db, "SELECT amount FROM charge_order WHERE order_no = ?", (order_no,)))
+
+
+def _recharge_for_settle(host: str, port: int, token: str, order_no: str, order: dict) -> None:
+    db = db_path()
+    amount = _order_amount(db, order_no, order)
+    balance = db_query_scalar(
+        db,
+        "SELECT u.balance FROM user u "
+        "JOIN charge_order o ON o.user_id = u.id WHERE o.order_no = ?",
+        (order_no,),
+    )
+    if balance + 0.001 >= amount:
+        return
+    need = round(amount - balance + 1.0, 2)
+    if need < 0.01:
+        need = 1.0
+    run_test(
+        host,
+        port,
+        {"id": "finR", "cmd": "user.recharge", "token": token, "data": {"amount": need}},
+        f"finish recharge {need} for {order_no}",
+    )
+
+
 def finish_order(host: str, port: int, token: str, order_no: str, admin_token: str) -> None:
     check = send_request(
         host,
@@ -122,7 +151,9 @@ def finish_order(host: str, port: int, token: str, order_no: str, admin_token: s
     if not check.get("ok") or not check.get("data", {}).get("has_open"):
         return
     order = check["data"]["order"]
-    if order["order_no"] != order_no:
+    if order_no and order["order_no"] != order_no:
+        order_no = order["order_no"]
+    elif not order_no:
         order_no = order["order_no"]
     status = order["status"]
     if status == "预约":
@@ -134,18 +165,50 @@ def finish_order(host: str, port: int, token: str, order_no: str, admin_token: s
         )
         status = "充电中"
     if status == "充电中":
-        run_test(
+        stop = run_test(
             host,
             port,
             {"id": "fin2", "cmd": "charge.stop", "token": token, "data": {"order_no": order_no}},
             f"finish stop {order_no}",
         )
+        order["amount"] = stop["data"]["amount"]
+        status = "待支付"
+    if status != "待支付":
+        return
+
     settle = send_request(
         host,
         port,
         {"id": "fin3", "cmd": "charge.settle", "token": token, "data": {"order_no": order_no}},
     )
-    if not settle.get("ok"):
+    if settle.get("ok"):
+        return
+
+    code = settle.get("error", {}).get("code")
+    if code == "BALANCE_NOT_ENOUGH":
+        _recharge_for_settle(host, port, token, order_no, order)
+        if admin_token:
+            run_test(
+                host,
+                port,
+                {
+                    "id": "fin4",
+                    "cmd": "order.admin.settle",
+                    "token": admin_token,
+                    "data": {"order_no": order_no},
+                },
+                f"finish admin settle {order_no}",
+            )
+        else:
+            run_test(
+                host,
+                port,
+                {"id": "fin4", "cmd": "charge.settle", "token": token, "data": {"order_no": order_no}},
+                f"finish settle after recharge {order_no}",
+            )
+        return
+
+    if admin_token:
         run_test(
             host,
             port,
@@ -157,6 +220,8 @@ def finish_order(host: str, port: int, token: str, order_no: str, admin_token: s
             },
             f"finish admin settle {order_no}",
         )
+    else:
+        raise RuntimeError(f"finish settle failed: {settle}")
 
 
 def test_admin_dashboard_api(host: str, port: int, admin_token: str) -> None:
@@ -437,12 +502,7 @@ def test_tx_settle_insufficient_no_partial(host: str, port: int, admin_token: st
     if order_status != "待支付":
         raise RuntimeError(f"insufficient settle should leave 待支付, got {order_status}")
 
-    run_test(
-        host,
-        port,
-        {"id": "F6", "cmd": "order.admin.settle", "token": admin_token, "data": {"order_no": order_no}},
-        "order.admin.settle cleanup 8004 order",
-    )
+    finish_order(host, port, token8004, order_no, admin_token)
 
 
 def test_tx_admin_settle_operation_log(host: str, port: int, token: str, admin_token: str) -> None:

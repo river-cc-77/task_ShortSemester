@@ -96,25 +96,74 @@ def finish_order(host: str, port: int, token: str, order_no: str, admin_token: O
         )
         status = "充电中"
     if status == "充电中":
-        run_test(
+        stop = run_test(
             host, port,
             {"id": "fin2", "cmd": "charge.stop", "token": token, "data": {"order_no": order_no}},
             f"finish stop {order_no}",
         )
+        order["amount"] = stop["data"]["amount"]
         status = "待支付"
     if status == "待支付":
         settle = send_request(
             host, port,
             {"id": "fin3", "cmd": "charge.settle", "token": token, "data": {"order_no": order_no}},
         )
-        if not settle.get("ok") and admin_token:
+        if settle.get("ok"):
+            return
+        code = settle.get("error", {}).get("code")
+        if code == "BALANCE_NOT_ENOUGH":
+            db = db_path()
+            amount = order.get("amount")
+            if amount is None or float(amount) <= 0:
+                conn = sqlite3.connect(db)
+                cur = conn.cursor()
+                cur.execute("SELECT amount FROM charge_order WHERE order_no = ?", (order_no,))
+                row = cur.fetchone()
+                conn.close()
+                amount = float(row[0]) if row else 0.0
+            else:
+                amount = float(amount)
+            conn = sqlite3.connect(db)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT u.balance FROM user u "
+                "JOIN charge_order o ON o.user_id = u.id WHERE o.order_no = ?",
+                (order_no,),
+            )
+            row = cur.fetchone()
+            conn.close()
+            balance = float(row[0]) if row else 0.0
+            if balance + 0.001 < amount:
+                need = round(amount - balance + 1.0, 2)
+                if need < 0.01:
+                    need = 1.0
+                run_test(
+                    host, port,
+                    {"id": "finR", "cmd": "user.recharge", "token": token, "data": {"amount": need}},
+                    f"finish recharge {need} for {order_no}",
+                )
+            if admin_token:
+                run_test(
+                    host, port,
+                    {"id": "fin4", "cmd": "order.admin.settle", "token": admin_token,
+                     "data": {"order_no": order_no}},
+                    f"finish admin settle {order_no}",
+                )
+            else:
+                run_test(
+                    host, port,
+                    {"id": "fin4", "cmd": "charge.settle", "token": token, "data": {"order_no": order_no}},
+                    f"finish settle after recharge {order_no}",
+                )
+            return
+        if admin_token:
             run_test(
                 host, port,
                 {"id": "fin4", "cmd": "order.admin.settle", "token": admin_token,
                  "data": {"order_no": order_no}},
                 f"finish admin settle {order_no}",
             )
-        elif not settle.get("ok"):
+        else:
             raise RuntimeError(f"finish settle failed: {settle}")
 
 
