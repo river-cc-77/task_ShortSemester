@@ -174,9 +174,9 @@ def test_admin_dashboard_api(host: str, port: int, admin_token: str) -> None:
     pile_status = data["pile_status"]
     if not isinstance(pile_status, dict):
         raise RuntimeError("pile_status should be object")
-    for status_key in ("在用", "闲置"):
+    for status_key in ("闲置", "预约", "在用", "故障"):
         if status_key not in pile_status:
-            raise RuntimeError(f"pile_status missing {status_key} (admin UI online calc)")
+            raise RuntimeError(f"pile_status missing {status_key} (admin UI expects all four)")
 
     run_test(
         host,

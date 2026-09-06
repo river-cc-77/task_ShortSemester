@@ -1023,8 +1023,15 @@ QJsonObject DbManager::fetchStatsOverview(int days)
     }
     result["revenue_trend"] = trend;
 
-    // 电桩状态分布
+    // 电桩状态分布（四类状态始终返回，无桩时为 0，便于 admin 总览页计算）
     QJsonObject pileStatus;
+    const QStringList allPileStatuses = {
+        QStringLiteral("闲置"), QStringLiteral("预约"),
+        QStringLiteral("在用"), QStringLiteral("故障"),
+    };
+    for (const QString &status : allPileStatuses) {
+        pileStatus[status] = 0;
+    }
     QSqlQuery pileStatusQuery(m_db);
     pileStatusQuery.exec("SELECT status, COUNT(*) AS cnt FROM pile GROUP BY status");
     while (pileStatusQuery.next()) {

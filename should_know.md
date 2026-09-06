@@ -57,6 +57,9 @@ python3 tools/test_server.py
 # Server 缺口补测（3h 超时、非法状态、筛选等，约 30s）
 python3 tools/test_server_gaps.py
 
+# Admin UI 后端 + 事务一致性（admin 新界面 API、16c6912 事务改造，约 20s）
+python3 tools/test_server_admin_tx.py
+
 # Collector 对账测试（需先跑一轮 ads-collector）
 cd collector && ./ads-collector 10
 # 另开终端：
@@ -123,6 +126,31 @@ qmake6 charge-admin.pro && make -j4
 
 运行：`python3 tools/test_server.py`（server 监听 9000）
 
+### 自动化（`tools/test_server_gaps.py`）
+
+| 类别 | 覆盖内容 |
+|------|----------|
+| 超时 | 预约超 3h 自动取消 |
+| 非法状态 | 预约态 stop、待支付态 start |
+| 筛选 | `order.list` status/phone/date |
+| P2/边界 | pile.delete  busy、重复 admin.settle、station.create 校验 |
+
+运行：`python3 tools/test_server_gaps.py`
+
+### 自动化（`tools/test_server_admin_tx.py`）
+
+| 类别 | 覆盖内容 |
+|------|----------|
+| Admin 总览 | `stats.overview` 字段（today_revenue/orders/user_count/pile_status） |
+| Admin 用户页 | `user.admin.list`、`phone_keyword` 搜索、表格字段 |
+| 冻结/解冻 | `user.freeze` 后登录失败、解冻后恢复 |
+| 事务 reserve | DB 中订单「预约」与桩「预约」一致 |
+| 事务 settle | 扣款、wallet_log、订单「已完成」、桩回「闲置」一致 |
+| 余额不足 | 结算失败时不部分扣款、订单仍「待支付」 |
+| 代结算日志 | `order.admin.settle` 写 `operation_log` |
+
+运行：`python3 tools/test_server_admin_tx.py`（建议 fresh db + 重编 server 后跑）
+
 ### 自动化（`tools/test_collector.py`）
 
 | 类别 | 覆盖内容 |
@@ -138,11 +166,9 @@ qmake6 charge-admin.pro && make -j4
 
 | 功能 | 预期测试 |
 |------|----------|
-| 预约超 3h 未启动自动取消 | 改 `reserve_at` 为 3h 前 → 订单作废、桩回闲置、提示「预约已超时，请重新预约」 |
-| `order.admin.settle` | 管理员代结算待支付单 + 写 operation_log |
 | `station.create` 站名重复 | 返回「站名已存在」 |
-| `pile.update` / `pile.delete` | 改桩信息、删闲置桩 |
 | `forecast.list` / `event.push` | 第二阶段 ML 与推送 |
+| admin 电桩/电站/日志页 UI | 接 pile.list、station.admin.list 等 API |
 
 ### 手工 / UI 联调
 

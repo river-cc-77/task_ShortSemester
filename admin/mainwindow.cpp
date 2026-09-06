@@ -308,7 +308,8 @@ void MainWindow::reloadOverviewStat()
     ui->labUserCnt->setText(QString::number(d["user_count"].toInt()));
 
     QJsonObject pileStat = d["pile_status"].toObject();
-    int online = pileStat["在用"].toInt() + pileStat["闲置"].toInt();
+    const int online = pileStat.value(QStringLiteral("在用")).toInt(0)
+                     + pileStat.value(QStringLiteral("闲置")).toInt(0);
     ui->labPileOnline->setText(QString::number(online));
 }
 
