@@ -132,6 +132,7 @@ qmake6 charge-admin.pro && make -j4
 |------|----------|
 | 超时 | 预约超 3h 自动取消 |
 | 非法状态 | 预约态 stop、待支付态 start |
+| 待支付桩 | 显示闲置但他人不可预约（PILE_BUSY） |
 | 筛选 | `order.list` status/phone/date |
 | P2/边界 | pile.delete  busy、重复 admin.settle、station.create 校验 |
 

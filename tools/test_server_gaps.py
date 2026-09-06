@@ -247,6 +247,38 @@ def test_illegal_charge_states(host: str, port: int, token8003: str, token8002: 
     )
 
 
+def test_unpaid_pile_reserve_blocked(host: str, port: int, token8001: str, token8002: str) -> None:
+    print("\n========== C. 待支付桩显示闲置但不可被他人预约 ==========")
+    open8002 = run_test(
+        host, port,
+        {"id": "C1", "cmd": "order.check_open", "token": token8002, "data": {}},
+        "8002 check_open (need 待支付 on SZ001-05)",
+    )
+    if not open8002["data"].get("has_open"):
+        raise RuntimeError("8002 needs a 待支付 order — rebuild db/seed before gap tests")
+    if open8002["data"]["order"].get("pile_no") != "SZ001-05":
+        raise RuntimeError("8002 pending order should be on SZ001-05")
+
+    finish_order(host, port, token8001, "", None)
+
+    detail = run_test(
+        host, port,
+        {"id": "C2", "cmd": "station.detail", "token": token8001, "data": {"station_id": 1}},
+        "station.detail for SZ001-05 status",
+    )
+    piles = {p["pile_no"]: p for p in detail["data"]["piles"]}
+    if piles.get("SZ001-05", {}).get("status") != "闲置":
+        raise RuntimeError("待支付订单的桩在列表中应显示闲置")
+
+    run_test_error(
+        host, port,
+        {"id": "C3", "cmd": "charge.reserve", "token": token8001,
+         "data": {"pile_no": "SZ001-05"}},
+        "reserve SZ001-05 blocked by unpaid order",
+        "PILE_BUSY",
+    )
+
+
 def test_order_list_filters(host: str, port: int, admin_token: str) -> None:
     print("\n========== C. order.list 筛选 ==========")
     done = run_test(
@@ -441,6 +473,7 @@ def main() -> int:
 
     test_3h_timeout(host, port, token8003)
     test_illegal_charge_states(host, port, token8003, token8002)
+    test_unpaid_pile_reserve_blocked(host, port, token, token8002)
     test_order_list_filters(host, port, admin_token)
     test_pile_delete_busy(host, port, token8003, admin_token)
     test_admin_settle_duplicate(host, port, admin_token)

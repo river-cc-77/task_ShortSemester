@@ -194,6 +194,10 @@ QJsonObject OrderHandler::reserve(const QString &id, const QString &token, const
     if (pileStatus != QStringLiteral("闲置")) {
         return Protocol::makeError(id, "PILE_BUSY", "电桩不可用");
     }
+    // 待支付订单的桩在 UI 上显示「闲置」，但仍不可被他人预约
+    if (DbManager::instance().pileHasOpenOrders(pileNo)) {
+        return Protocol::makeError(id, "PILE_BUSY", "电桩不可用");
+    }
 
     // 3. 创建订单并更新电桩状态（事务）
     const auto orderNoOpt = DbManager::instance().reservePile(
@@ -222,6 +226,8 @@ QJsonObject OrderHandler::start(const QString &id, const QString &token, const Q
     const QJsonObject auth = authUser(id, token, session);
     if (!auth.isEmpty()) return auth;
 
+    DbManager::instance().cancelExpiredReservations();
+
     const QString orderNo = data.value("order_no").toString().trimmed();
     if (orderNo.isEmpty()) {
         return Protocol::makeError(id, "INVALID_PARAM", "缺少 order_no");
@@ -239,6 +245,14 @@ QJsonObject OrderHandler::start(const QString &id, const QString &token, const Q
     }
     if (order.value("status").toString() != QStringLiteral("预约")) {
         return Protocol::makeError(id, "INVALID_PARAM", "订单状态不允许开始充电");
+    }
+
+    const auto pileOpt = DbManager::instance().findPileByNo(order.value("pile_no").toString());
+    if (!pileOpt.has_value()) {
+        return Protocol::makeError(id, "NOT_FOUND", "电桩不存在");
+    }
+    if (pileOpt.value().value("status").toString() == QStringLiteral("故障")) {
+        return Protocol::makeError(id, "PILE_FAULT", "电桩故障，无法开始充电");
     }
 
     // 更新订单与电桩状态（事务）
@@ -313,6 +327,8 @@ QJsonObject OrderHandler::stop(const QString &id, const QString &token, const QJ
     const QJsonObject auth = authUser(id, token, session);
     if (!auth.isEmpty()) return auth;
 
+    DbManager::instance().cancelExpiredReservations();
+
     const QString orderNo = data.value("order_no").toString().trimmed();
     if (orderNo.isEmpty()) {
         return Protocol::makeError(id, "INVALID_PARAM", "缺少 order_no");
@@ -359,6 +375,7 @@ QJsonObject OrderHandler::settle(const QString &id, const QString &token, const 
     SessionInfo session;
     const QJsonObject auth = authUserOrAdmin(id, token, session);
     if (!auth.isEmpty()) return auth;
+    DbManager::instance().cancelExpiredReservations();
     return settleCore(id, session, data);
 }
 
@@ -378,5 +395,6 @@ QJsonObject OrderHandler::adminSettle(const QString &id, const QString &token, c
     if (!DbManager::instance().isOpen()) {
         return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
     }
+    DbManager::instance().cancelExpiredReservations();
     return settleCore(id, session, data);
 }

@@ -168,23 +168,35 @@ bool DbManager::updateUserProfile(int userId, const QString &nickname, const QSt
 
 std::optional<double> DbManager::rechargeUser(int userId, double amount)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE user SET balance = balance + :amount WHERE id = :id");
-    query.bindValue(":amount", amount);
-    query.bindValue(":id", userId);
+    std::optional<double> balanceAfter;
+    const bool ok = runInTransaction([&]() {
+        QSqlQuery query(m_db);
+        query.prepare("UPDATE user SET balance = balance + :amount WHERE id = :id");
+        query.bindValue(":amount", amount);
+        query.bindValue(":id", userId);
+        if (!query.exec()) {
+            qWarning() << "rechargeUser failed:" << query.lastError().text();
+            return false;
+        }
 
-    if (!query.exec()) {
-        qWarning() << "rechargeUser failed:" << query.lastError().text();
+        if (!writeWalletLog(userId, amount, QStringLiteral("充值"))) {
+            return false;
+        }
+
+        QSqlQuery balanceQuery(m_db);
+        balanceQuery.prepare("SELECT balance FROM user WHERE id = :id");
+        balanceQuery.bindValue(":id", userId);
+        if (!balanceQuery.exec() || !balanceQuery.next()) {
+            return false;
+        }
+        balanceAfter = balanceQuery.value(0).toDouble();
+        return true;
+    });
+
+    if (!ok) {
         return std::nullopt;
     }
-
-    writeWalletLog(userId, amount, QStringLiteral("充值"));
-
-    auto userOpt = findUserById(userId);
-    if (userOpt.has_value()) {
-        return userOpt.value().value("balance").toDouble();
-    }
-    return std::nullopt;
+    return balanceAfter;
 }
 
 QJsonArray DbManager::fetchAdminUsers(const QString &phoneKeyword)
@@ -853,6 +865,16 @@ std::optional<QString> DbManager::reservePile(int userId, int stationId, int pil
 {
     std::optional<QString> orderNo;
     const bool ok = runInTransaction([&]() {
+        QSqlQuery openQuery(m_db);
+        openQuery.prepare(
+            "SELECT COUNT(*) FROM charge_order "
+            "WHERE pile_id = :pid AND status IN ('预约', '充电中', '待支付')");
+        openQuery.bindValue(":pid", pileId);
+        if (!openQuery.exec() || !openQuery.next()
+            || openQuery.value(0).toInt() > 0) {
+            return false;
+        }
+
         const QString created = createOrder(userId, stationId, pileId);
         if (created.isEmpty()) {
             return false;

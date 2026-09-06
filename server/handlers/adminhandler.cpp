@@ -102,10 +102,13 @@ QJsonObject AdminHandler::pileRestart(const QString &id, const QString &token, c
         return Protocol::makeError(id, "NOT_FOUND", "电桩不存在");
     }
 
-    // 使用中的电桩（预约/在用）不可重启
+    // 使用中的电桩（预约/在用）或有未完成订单时不可重启
     const QString pileStatus = pileOpt.value().value("status").toString();
     if (pileStatus == QStringLiteral("预约") || pileStatus == QStringLiteral("在用")) {
         return Protocol::makeError(id, "INVALID_PARAM", "该电桩使用中，无法重启");
+    }
+    if (DbManager::instance().pileHasOpenOrders(pileNo)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "该电桩有未完成订单，无法重启");
     }
 
     if (!DbManager::instance().restartPile(pileNo)) {
@@ -160,6 +163,9 @@ QJsonObject AdminHandler::pileUpdate(const QString &id, const QString &token, co
     }
     if (type.isEmpty() && powerKw == -1 && status.isEmpty()) {
         return Protocol::makeError(id, "INVALID_PARAM", "至少提供一个要修改的字段");
+    }
+    if (!status.isEmpty() && DbManager::instance().pileHasOpenOrders(pileNo)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "该电桩有未完成订单，无法修改状态");
     }
 
     if (!DbManager::instance().updatePile(pileNo, type, powerKw, status)) {

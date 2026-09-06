@@ -680,9 +680,10 @@ amount = round(kwh × station.price, 2)
 
 **拦截规则：**
 
-- 用户存在「充电中」或「待支付」订单 → 禁止新预约（`order.check_open` 返回 has_open=true）
+- 用户存在「预约」「充电中」或「待支付」订单 → 禁止新预约（`order.check_open` 返回 has_open=true）
 - 故障电桩 → 禁止预约（`PILE_FAULT`）
-- 非闲置电桩 → 禁止预约（`PILE_BUSY`）
+- 电桩状态非「闲置」→ 禁止预约（`PILE_BUSY`）
+- 电桩存在未完成订单（含「待支付」）→ 禁止预约（`PILE_BUSY`）；**待支付时桩仍显示「闲置」**（充电已结束，物理上空闲，但订单未结算前不可被他人占用）
 
 ---
 

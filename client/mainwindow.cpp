@@ -289,6 +289,8 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     connect(m_orderButton, &QPushButton::clicked, this, &MainWindow::onOrderHistory);
     connect(m_favoriteButton, &QPushButton::clicked, this, &MainWindow::onFavoriteList);
     loadStations();
+
+    QTimer::singleShot(0, this, [this]() { checkOpenOrder(false); });
 }
 
 void MainWindow::onRefreshStations()
@@ -492,7 +494,7 @@ void MainWindow::showStationDetail(int stationId)
         }
 
         // NO 13.0：先检查未完成订单，有则拦截
-        if (checkOpenOrder()) return;
+        if (checkOpenOrder(true)) return;
 
         // NO 14.0：预约电桩
         QJsonObject reserveData;
@@ -1070,10 +1072,19 @@ void MainWindow::onFavoriteList()
     dlg.exec();
 }
 
-bool MainWindow::checkOpenOrder()
+bool MainWindow::checkOpenOrder(bool failClosed)
 {
     const QJsonObject resp = m_api->call(QStringLiteral("order.check_open"), QJsonObject());
-    if (!resp.value(QStringLiteral("ok")).toBool()) return false;
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        if (failClosed) {
+            const QJsonObject err = resp.value(QStringLiteral("error")).toObject();
+            QMessageBox::warning(this, QStringLiteral("提示"),
+                                 err.value(QStringLiteral("message")).toString(
+                                     QStringLiteral("无法检查未完成订单，请稍后重试")));
+            return true;
+        }
+        return false;
+    }
 
     const QJsonObject data = resp.value(QStringLiteral("data")).toObject();
     if (!data.value(QStringLiteral("has_open")).toBool()) return false;
@@ -1196,13 +1207,32 @@ void MainWindow::showChargingProgress(const QString &orderNo)
     lay->addWidget(statusLabel);
     lay->addWidget(stopBtn);
 
+    QTimer *timer = new QTimer(&dlg);
+
     // 刷新进度的 lambda
     auto refresh = [&]() {
         QJsonObject data;
         data["order_no"] = orderNo;
         const QJsonObject resp = m_api->call(QStringLiteral("charge.progress"), data);
-        if (!resp.value(QStringLiteral("ok")).toBool()) return;
+        if (!resp.value(QStringLiteral("ok")).toBool()) {
+            statusLabel->setText(QStringLiteral("状态：刷新失败，请检查网络"));
+            return;
+        }
         const QJsonObject d = resp.value(QStringLiteral("data")).toObject();
+        const QString orderStatus = d.value(QStringLiteral("status")).toString();
+        if (orderStatus != QStringLiteral("充电中")) {
+            timer->stop();
+            dlg.accept();
+            if (orderStatus == QStringLiteral("待支付")) {
+                showSettleDialog(orderNo,
+                                 d.value(QStringLiteral("kwh")).toDouble(),
+                                 d.value(QStringLiteral("amount")).toDouble());
+            } else {
+                QMessageBox::information(this, QStringLiteral("提示"),
+                    QStringLiteral("订单状态已变为「%1」，充电窗口已关闭。").arg(orderStatus));
+            }
+            return;
+        }
         const double kwh = d.value(QStringLiteral("kwh")).toDouble();
         const double amount = d.value(QStringLiteral("amount")).toDouble();
         const qint64 elapsed = d.value(QStringLiteral("elapsed_seconds")).toInteger();
@@ -1223,8 +1253,6 @@ void MainWindow::showChargingProgress(const QString &orderNo)
 
     refresh();  // 立即刷一次
 
-    // 每2秒自动刷新
-    QTimer *timer = new QTimer(&dlg);
     connect(timer, &QTimer::timeout, &dlg, refresh);
     timer->start(2000);
 
@@ -1306,8 +1334,65 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
     connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
 
     connect(rechargeBtn, &QPushButton::clicked, &dlg, [&]() {
-        QMessageBox::information(&dlg, QStringLiteral("提示"),
-            QStringLiteral("请关闭本窗口，在主窗口点「个人中心」→「充值」完成后再结算"));
+        QDialog rechargeDlg(&dlg);
+        rechargeDlg.setWindowTitle(QStringLiteral("余额充值"));
+        rechargeDlg.resize(320, 200);
+
+        auto *rLay = new QVBoxLayout(&rechargeDlg);
+        auto *hint = new QLabel(
+            QStringLiteral("当前余额：%1 元，应付：%2 元")
+                .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2)
+                .arg(amount, 0, 'f', 2),
+            &rechargeDlg);
+        auto *amountEdit = new QLineEdit(&rechargeDlg);
+        amountEdit->setPlaceholderText(QStringLiteral("请输入充值金额（最多2位小数）"));
+        amountEdit->setValidator(new QDoubleValidator(0.01, 999999.0, 2, &rechargeDlg));
+        const double need = qMax(0.01, amount - m_user.value(QStringLiteral("balance")).toDouble());
+        amountEdit->setText(QString::number(qMax(need, 1.0), 'f', 2));
+
+        auto *confirmBtn = new QPushButton(QStringLiteral("确认充值"), &rechargeDlg);
+        auto *cancelBtn2 = new QPushButton(QStringLiteral("取消"), &rechargeDlg);
+        confirmBtn->setStyleSheet(m_refreshButton->styleSheet());
+        cancelBtn2->setStyleSheet(m_refreshButton->styleSheet());
+
+        auto *btnRow2 = new QHBoxLayout;
+        btnRow2->addStretch();
+        btnRow2->addWidget(cancelBtn2);
+        btnRow2->addWidget(confirmBtn);
+        rLay->addWidget(hint);
+        rLay->addWidget(amountEdit);
+        rLay->addLayout(btnRow2);
+
+        connect(cancelBtn2, &QPushButton::clicked, &rechargeDlg, &QDialog::reject);
+        connect(confirmBtn, &QPushButton::clicked, &rechargeDlg, [&]() {
+            const QString text = amountEdit->text().trimmed();
+            bool ok = false;
+            const double rechargeAmount = text.toDouble(&ok);
+            if (!ok || rechargeAmount <= 0) {
+                QMessageBox::warning(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("请输入有效充值金额"));
+                return;
+            }
+            QJsonObject reqData;
+            reqData["amount"] = rechargeAmount;
+            const QJsonObject resp = m_api->call(QStringLiteral("user.recharge"), reqData);
+            if (!resp.value(QStringLiteral("ok")).toBool()) {
+                const QJsonObject err = resp.value(QStringLiteral("error")).toObject();
+                QMessageBox::warning(&rechargeDlg, QStringLiteral("充值失败"),
+                                     err.value(QStringLiteral("message")).toString());
+                return;
+            }
+            const double newBalance = resp.value(QStringLiteral("data")).toObject()
+                                          .value(QStringLiteral("balance_after")).toDouble();
+            m_user["balance"] = newBalance;
+            m_userLabel->setText(QStringLiteral("欢迎，%1 | 余额 %2 元")
+                                     .arg(m_user.value(QStringLiteral("nickname")).toString())
+                                     .arg(newBalance, 0, 'f', 2));
+            balanceLabel->setText(QStringLiteral("当前余额：%1 元").arg(newBalance, 0, 'f', 2));
+            QMessageBox::information(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("充值成功"));
+            rechargeDlg.accept();
+        });
+
+        rechargeDlg.exec();
     });
 
     connect(settleBtn, &QPushButton::clicked, &dlg, [&]() {

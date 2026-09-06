@@ -35,7 +35,7 @@ private:
     void loadStations();
     void showStationDetail(int stationId); // 弹出站点详情对话框
     QJsonObject geocodeByBaidu(const QString &address);// 调用百度地图地理编码 API，返回 {lat, lng}，失败返回空对象
-    bool checkOpenOrder();   // 检查未完成订单，有则弹窗提示并返回 true
+    bool checkOpenOrder(bool failClosed = false);   // 检查未完成订单，有则弹窗提示并返回 true
     void showChargingProgress(const QString &orderNo);   // 充电中页面
     void showSettleDialog(const QString &orderNo, double kwh, double amount);  // 结算页面
 
