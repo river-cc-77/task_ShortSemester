@@ -94,21 +94,22 @@ def db_query_scalar(db: Path, sql: str, params: tuple = ()) -> Any:
 
 
 def find_idle_pile(host: str, port: int, token: str) -> str:
-    detail = send_request(
-        host,
-        port,
-        {
-            "id": "idle0",
-            "cmd": "station.detail",
-            "token": token,
-            "data": {"station_id": 1},
-        },
-    )
-    if not detail.get("ok"):
-        raise RuntimeError(f"station.detail failed: {detail}")
-    for pile in detail["data"]["piles"]:
-        if pile.get("status") == "闲置":
-            return pile["pile_no"]
+    for station_id in range(1, 6):
+        detail = send_request(
+            host,
+            port,
+            {
+                "id": f"idle{station_id}",
+                "cmd": "station.detail",
+                "token": token,
+                "data": {"station_id": station_id},
+            },
+        )
+        if not detail.get("ok"):
+            continue
+        for pile in detail["data"]["piles"]:
+            if pile.get("status") == "闲置":
+                return pile["pile_no"]
     raise RuntimeError("no idle pile found for transaction test")
 
 
@@ -386,6 +387,9 @@ def test_tx_settle_insufficient_no_partial(host: str, port: int, admin_token: st
         "user.login 8004",
     )
     token8004 = user8004["data"]["token"]
+
+    # test_server.py 可能给 8004 留下待支付单，先清理
+    finish_order(host, port, token8004, "", admin_token)
 
     balance_before = db_query_scalar(db, "SELECT balance FROM user WHERE phone = ?", ("13800138004",))
 
