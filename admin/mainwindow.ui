@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>918</width>
-    <height>605</height>
+    <width>1017</width>
+    <height>716</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -18,7 +18,6 @@
 QMainWindow{
     background-color:#f7f8fa;
 }
-
 /* 侧边栏容器：对象名 sideBarWidget，QWidget不识别padding，padding删掉，边距交给内部布局 */
 QWidget#sideBarWidget
 {
@@ -26,7 +25,6 @@ QWidget#sideBarWidget
     border:1px solid #e2e2e2;
     border-radius:12px;
 }
-
 /* 侧边按钮普通状态 */
 QPushButton
 {
@@ -62,7 +60,6 @@ QPushButton:pressed
 {
     background-color:#e9e9e9;
 }
-
 /* StackedWidget：外层大圆角白色卡片容器 */
 QStackedWidget
 {
@@ -70,34 +67,44 @@ QStackedWidget
     border-radius:12px;
     border:1px solid #e2e2e2;
 }
-
-/* 四个统计卡片 */
-QWidget#card1, QWidget#card2, QWidget#card3, QWidget#card4
+/* 六个统计卡片【合并card1‑card6，统一背景边框】 */
+QWidget#card1, QWidget#card2, QWidget#card3, QWidget#card4,
+QWidget#card5, QWidget#card6
 {
-    background-color:#fff5eb;
+    background-color:#f0f7ff;
     border-radius:10px;
-    border:1px solid #f2d8c3;
+    border:1px solid #d9e8ff;
 }
 
-/* 卡片标题：15pt */
-QLabel#labTitleincome,
+/* 卡片标题：15pt，修正为正确对象名 labTitleIncome */
+QLabel#labTitleIncome,
 QLabel#labTitleOrder,
 QLabel#labTitleOnline,
-QLabel#labTitleUser
+QLabel#labTitleUser,
+QLabel#labTitleMonthIncome,
+QLabel#labTitleTotalIncome
 {
     font-size: 15pt;
     color: #404040;
 }
-
-/* 卡片数值：23pt */
+/* 卡片数值：23pt，新增本月、累计营收数值标签 */
 QLabel#labIncome,
 QLabel#labOrderCnt,
 QLabel#labPileOnline,
-QLabel#labUserCnt
+QLabel#labUserCnt,
+QLabel#labMonthIncome,
+QLabel#labTotalIncome
 {
     font-size: 23pt;
     font-weight: 600;
     color: #111111;
+}
+
+/* -------- 顶部两个操作按钮（刷新、图表按钮）可选微调 -------- */
+QPushButton#btnRefresh, QPushButton#btnShowChart
+{
+    padding:6px 14px;
+    font-size:10pt;
 }
 </string>
   </property>
@@ -214,7 +221,7 @@ QLabel#labUserCnt
        </sizepolicy>
       </property>
       <property name="currentIndex">
-       <number>0</number>
+       <number>1</number>
       </property>
       <widget class="QWidget" name="page_0">
        <property name="sizePolicy">
@@ -223,7 +230,7 @@ QLabel#labUserCnt
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
-       <layout class="QGridLayout" name="gridLayout" rowstretch="1,1" columnstretch="1,1">
+       <layout class="QGridLayout" name="gridLayout" rowstretch="0,0,0,0" columnstretch="0,0">
         <property name="leftMargin">
          <number>20</number>
         </property>
@@ -239,7 +246,36 @@ QLabel#labUserCnt
         <property name="spacing">
          <number>18</number>
         </property>
-        <item row="0" column="0">
+        <item row="3" column="1">
+         <widget class="QWidget" name="card6" native="true">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_8" stretch="1,2">
+           <item>
+            <widget class="QLabel" name="labTitleTotalIncome">
+             <property name="text">
+              <string>累计总营收</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="labTotalIncome">
+             <property name="text">
+              <string>labTotalIncome</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item row="1" column="0">
          <widget class="QWidget" name="card1" native="true">
           <property name="sizePolicy">
            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
@@ -247,161 +283,72 @@ QLabel#labUserCnt
             <verstretch>0</verstretch>
            </sizepolicy>
           </property>
-          <widget class="QWidget" name="layoutWidget">
-           <property name="geometry">
-            <rect>
-             <x>10</x>
-             <y>10</y>
-             <width>291</width>
-             <height>211</height>
-            </rect>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_2" stretch="1,2">
-            <property name="spacing">
-             <number>8</number>
-            </property>
-            <property name="leftMargin">
-             <number>12</number>
-            </property>
-            <property name="topMargin">
-             <number>12</number>
-            </property>
-            <property name="rightMargin">
-             <number>12</number>
-            </property>
-            <property name="bottomMargin">
-             <number>12</number>
-            </property>
-            <item>
-             <widget class="QLabel" name="labTitleincome">
-              <property name="text">
-               <string>今日营收</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLabel" name="labIncome">
-              <property name="text">
-               <string>labIncome</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </widget>
+          <layout class="QVBoxLayout" name="verticalLayout_2" stretch="1,2">
+           <item>
+            <widget class="QLabel" name="labTitleIncome">
+             <property name="text">
+              <string>今日营收</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="labIncome">
+             <property name="text">
+              <string>labIncome</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
          </widget>
         </item>
         <item row="0" column="1">
-         <widget class="QWidget" name="card2" native="true">
+         <widget class="QWidget" name="widget_top_bar" native="true">
           <property name="sizePolicy">
-           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
             <horstretch>0</horstretch>
             <verstretch>0</verstretch>
            </sizepolicy>
           </property>
-          <widget class="QWidget" name="layoutWidget">
-           <property name="geometry">
-            <rect>
-             <x>10</x>
-             <y>10</y>
-             <width>291</width>
-             <height>211</height>
-            </rect>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_3" stretch="1,2">
-            <property name="spacing">
-             <number>8</number>
-            </property>
-            <property name="leftMargin">
-             <number>12</number>
-            </property>
-            <property name="topMargin">
-             <number>12</number>
-            </property>
-            <property name="rightMargin">
-             <number>12</number>
-            </property>
-            <property name="bottomMargin">
-             <number>12</number>
-            </property>
-            <item>
-             <widget class="QLabel" name="labTitleOrder">
-              <property name="text">
-               <string>今日订单</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLabel" name="labOrderCnt">
-              <property name="text">
-               <string>labOrderCnt</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </widget>
+          <layout class="QHBoxLayout" name="horizontalLayout_3">
+           <item>
+            <widget class="QPushButton" name="btnRefresh">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>刷新</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnChart">
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>营收折线图</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
          </widget>
         </item>
-        <item row="1" column="0">
-         <widget class="QWidget" name="card3" native="true">
-          <property name="sizePolicy">
-           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-            <horstretch>0</horstretch>
-            <verstretch>0</verstretch>
-           </sizepolicy>
-          </property>
-          <widget class="QWidget" name="layoutWidget">
-           <property name="geometry">
-            <rect>
-             <x>10</x>
-             <y>10</y>
-             <width>291</width>
-             <height>211</height>
-            </rect>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_4" stretch="1,2">
-            <property name="spacing">
-             <number>8</number>
-            </property>
-            <property name="leftMargin">
-             <number>12</number>
-            </property>
-            <property name="topMargin">
-             <number>12</number>
-            </property>
-            <property name="rightMargin">
-             <number>12</number>
-            </property>
-            <property name="bottomMargin">
-             <number>12</number>
-            </property>
-            <item>
-             <widget class="QLabel" name="labTitleOnline">
-              <property name="text">
-               <string>在线电桩</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLabel" name="labPileOnline">
-              <property name="text">
-               <string>labPileOnline</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </widget>
-         </widget>
-        </item>
-        <item row="1" column="1">
+        <item row="2" column="1">
          <widget class="QWidget" name="card4" native="true">
           <property name="sizePolicy">
            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
@@ -409,68 +356,362 @@ QLabel#labUserCnt
             <verstretch>0</verstretch>
            </sizepolicy>
           </property>
-          <widget class="QWidget" name="layoutWidget">
-           <property name="geometry">
-            <rect>
-             <x>0</x>
-             <y>10</y>
-             <width>301</width>
-             <height>211</height>
-            </rect>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_5" stretch="1,2">
-            <property name="spacing">
-             <number>8</number>
-            </property>
-            <property name="leftMargin">
-             <number>12</number>
-            </property>
-            <property name="topMargin">
-             <number>12</number>
-            </property>
-            <property name="rightMargin">
-             <number>12</number>
-            </property>
-            <property name="bottomMargin">
-             <number>12</number>
-            </property>
-            <item>
-             <widget class="QLabel" name="labTitleUser">
-              <property name="text">
-               <string>用户总数</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLabel" name="labUserCnt">
-              <property name="text">
-               <string>labUserCnt</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </widget>
+          <layout class="QVBoxLayout" name="verticalLayout_5" stretch="1,2">
+           <item>
+            <widget class="QLabel" name="labTitleUser">
+             <property name="text">
+              <string>用户总数</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="labUserCnt">
+             <property name="text">
+              <string>labUserCnt</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QWidget" name="card2" native="true">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_3" stretch="1,2">
+           <item>
+            <widget class="QLabel" name="labTitleOrder">
+             <property name="text">
+              <string>今日订单</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="labOrderCnt">
+             <property name="text">
+              <string>labOrderCnt</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QWidget" name="card3" native="true">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_4" stretch="1,2">
+           <item>
+            <widget class="QLabel" name="labTitleOnline">
+             <property name="text">
+              <string>在线电桩</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="labPileOnline">
+             <property name="text">
+              <string>labPileOnline</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item row="3" column="0">
+         <widget class="QWidget" name="card5" native="true">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_7" stretch="1,2">
+           <item>
+            <widget class="QLabel" name="labTitleMonthIncome">
+             <property name="text">
+              <string>本月营收</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="labMonthIncome">
+             <property name="text">
+              <string>labMonthIncome</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
          </widget>
         </item>
        </layout>
       </widget>
       <widget class="QWidget" name="page_1">
-       <widget class="QLabel" name="labelPilePage">
-        <property name="geometry">
-         <rect>
-          <x>206</x>
-          <y>230</y>
-          <width>141</width>
-          <height>20</height>
-         </rect>
-        </property>
-        <property name="text">
-         <string>电桩管理页面</string>
-        </property>
-       </widget>
+       <layout class="QVBoxLayout" name="verticalLayout_10" stretch="0,0,1">
+        <item>
+         <widget class="QWidget" name="widget_4" native="true">
+          <layout class="QHBoxLayout" name="horizontalLayout_5">
+           <item>
+            <widget class="QComboBox" name="comboStation">
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>0</height>
+              </size>
+             </property>
+             <item>
+              <property name="text">
+               <string>全部电站
+</string>
+              </property>
+             </item>
+            </widget>
+           </item>
+           <item>
+            <widget class="QComboBox" name="comboPileStatus">
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>0</height>
+              </size>
+             </property>
+             <item>
+              <property name="text">
+               <string>全部状态</string>
+              </property>
+             </item>
+             <item>
+              <property name="text">
+               <string>闲置</string>
+              </property>
+             </item>
+             <item>
+              <property name="text">
+               <string>预约</string>
+              </property>
+             </item>
+             <item>
+              <property name="text">
+               <string>在用</string>
+              </property>
+             </item>
+             <item>
+              <property name="text">
+               <string>故障</string>
+              </property>
+             </item>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLineEdit" name="lineEditPileId">
+             <property name="placeholderText">
+              <string>请输入电桩编号</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnPileQuery">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>查询</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QWidget" name="widget_6" native="true">
+          <layout class="QHBoxLayout" name="horizontalLayout_7">
+           <item>
+            <spacer name="horizontalSpacer_2">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnGoPileStatus">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>80</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>跳转到电桩状态</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnAddPile">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>80</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>新增电桩</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnRemoteReboot">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>80</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>远程重启</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnBatchDelete">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>80</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>批量删除</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QWidget" name="widget_5" native="true">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_11">
+           <item>
+            <widget class="QTableWidget" name="tableWidgetPile">
+             <property name="selectionMode">
+              <enum>QAbstractItemView::MultiSelection</enum>
+             </property>
+             <property name="selectionBehavior">
+              <enum>QAbstractItemView::SelectRows</enum>
+             </property>
+             <property name="columnCount">
+              <number>8</number>
+             </property>
+             <column>
+              <property name="text">
+               <string>电桩编号</string>
+              </property>
+             </column>
+             <column>
+              <property name="text">
+               <string>所属电站</string>
+              </property>
+             </column>
+             <column>
+              <property name="text">
+               <string>电桩类型</string>
+              </property>
+             </column>
+             <column>
+              <property name="text">
+               <string>功率（kw)</string>
+              </property>
+             </column>
+             <column>
+              <property name="text">
+               <string>状态</string>
+              </property>
+             </column>
+             <column>
+              <property name="text">
+               <string>累计充电次数</string>
+              </property>
+             </column>
+             <column>
+              <property name="text">
+               <string>累计时长(min)</string>
+              </property>
+             </column>
+             <column>
+              <property name="text">
+               <string>操作</string>
+              </property>
+             </column>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+       </layout>
       </widget>
       <widget class="QWidget" name="page_2">
        <widget class="QLabel" name="labelStationPage">
@@ -490,17 +731,14 @@ QLabel#labUserCnt
       <widget class="QWidget" name="page_3">
        <layout class="QVBoxLayout" name="verticalLayout_6">
         <item>
-         <widget class="QLabel" name="labelUserPage">
-          <property name="text">
-           <string>用户管理页面</string>
-          </property>
-         </widget>
-        </item>
-        <item>
          <widget class="QWidget" name="widget" native="true">
           <layout class="QHBoxLayout" name="horizontalLayout_2" stretch="1,0">
            <item>
-            <widget class="QLineEdit" name="editSearchPhone"/>
+            <widget class="QLineEdit" name="editSearchPhone">
+             <property name="placeholderText">
+              <string>请输入手机号</string>
+             </property>
+            </widget>
            </item>
            <item>
             <widget class="QPushButton" name="btnSearch">
@@ -549,6 +787,70 @@ QLabel#labUserCnt
         </property>
        </widget>
       </widget>
+      <widget class="QWidget" name="page_5">
+       <layout class="QVBoxLayout" name="verticalLayout_9" stretch="0,1">
+        <item>
+         <widget class="QWidget" name="widget_2" native="true">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>0</height>
+           </size>
+          </property>
+          <layout class="QHBoxLayout" name="horizontalLayout_4">
+           <item>
+            <spacer name="horizontalSpacer">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnBackHome">
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>返回总览</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnShift">
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>btnShift</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QWidget" name="widget_chart" native="true"/>
+        </item>
+       </layout>
+      </widget>
      </widget>
     </item>
    </layout>
@@ -558,7 +860,7 @@ QLabel#labUserCnt
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>918</width>
+     <width>1017</width>
      <height>28</height>
     </rect>
    </property>
