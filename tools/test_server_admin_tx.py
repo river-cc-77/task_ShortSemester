@@ -842,6 +842,85 @@ def test_admin_pile_detail_and_create(host: str, port: int, token: str, admin_to
         raise RuntimeError("pile.create/delete should add operation_log rows")
 
 
+def test_admin_order_page_api(host: str, port: int, admin_token: str) -> None:
+    print("\n========== J. Admin 订单管理 order.list ==========")
+
+    all_orders = run_test(
+        host,
+        port,
+        {
+            "id": "J1",
+            "cmd": "order.list",
+            "token": admin_token,
+            "data": {"limit": 50, "date_from": "2026-08-01", "date_to": "2026-09-30"},
+        },
+        "order.list all",
+    )
+    items = all_orders["data"]["items"]
+    if not items:
+        raise RuntimeError("order.list returned empty on seed db")
+
+    required_fields = (
+        "order_no",
+        "phone",
+        "station_name",
+        "pile_no",
+        "status",
+        "kwh",
+        "amount",
+        "reserve_at",
+        "start_at",
+        "end_at",
+    )
+    for row in items:
+        for field in required_fields:
+            if field not in row:
+                raise RuntimeError(f"order.list row missing {field}: {row}")
+
+    pending = run_test(
+        host,
+        port,
+        {
+            "id": "J2",
+            "cmd": "order.list",
+            "token": admin_token,
+            "data": {
+                "status": "待支付",
+                "limit": 20,
+                "date_from": "2026-08-01",
+                "date_to": "2026-09-30",
+            },
+        },
+        "order.list status=待支付",
+    )
+    pending_items = pending["data"]["items"]
+    if not pending_items:
+        raise RuntimeError("seed should have at least one 待支付 order")
+    for row in pending_items:
+        if row.get("status") != "待支付":
+            raise RuntimeError(f"status filter leak: {row}")
+
+    by_phone = run_test(
+        host,
+        port,
+        {
+            "id": "J3",
+            "cmd": "order.list",
+            "token": admin_token,
+            "data": {
+                "phone": "13800138002",
+                "limit": 20,
+                "date_from": "2026-08-01",
+                "date_to": "2026-09-30",
+            },
+        },
+        "order.list phone=8002",
+    )
+    for row in by_phone["data"]["items"]:
+        if "13800138002" not in row.get("phone", ""):
+            raise RuntimeError(f"phone filter leak: {row}")
+
+
 def main() -> int:
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 9000
@@ -875,6 +954,7 @@ def main() -> int:
     test_admin_freeze_roundtrip(host, port, admin_token)
     test_admin_pile_page_api(host, port, token, admin_token)
     test_admin_pile_detail_and_create(host, port, token, admin_token)
+    test_admin_order_page_api(host, port, admin_token)
     test_tx_reserve_consistency(host, port, token, admin_token)
     test_tx_settle_consistency(host, port, token, admin_token)
     test_tx_settle_insufficient_no_partial(host, port, admin_token)

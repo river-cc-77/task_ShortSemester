@@ -31,9 +31,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     /*构建界面*/
     auto *central = new QWidget(this);
     m_userLabel = new QLabel(central);
-    m_userLabel->setText(QStringLiteral("欢迎，%1 | 余额 %2 元")
-                             .arg(m_user.value(QStringLiteral("nickname")).toString())
-                             .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2));
+    updateUserHeaderLabel();
 
     auto *locLabel = new QLabel(QStringLiteral("当前位置（模拟 GPS）："), central);
     m_latEdit = new QLineEdit(QStringLiteral("22.5431"), central);
@@ -626,6 +624,8 @@ QJsonObject MainWindow::geocodeByBaidu(const QString &address)
 // 个人中心
 void MainWindow::onProfileCenter()
 {
+    refreshUserProfile();
+
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("个人中心"));
     dlg.resize(380, 420);
@@ -758,10 +758,7 @@ void MainWindow::onProfileCenter()
         const QJsonObject data = resp.value(QStringLiteral("data")).toObject();
         m_user["nickname"] = data.value(QStringLiteral("nickname")).toString();
         m_user["avatar_path"] = data.value(QStringLiteral("avatar_path")).toString();
-        // 刷新主窗口欢迎语
-        m_userLabel->setText(QStringLiteral("欢迎，%1 | 余额 %2 元")
-                                 .arg(m_user.value(QStringLiteral("nickname")).toString())
-                                 .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2));
+        updateUserHeaderLabel();
         QMessageBox::information(&dlg, QStringLiteral("提示"), QStringLiteral("保存成功"));
         dlg.accept();
     });
@@ -833,9 +830,7 @@ void MainWindow::onProfileCenter()
             m_user["balance"] = newBalance;
             balanceLabel->setText(QStringLiteral("余额：%1 元").arg(newBalance, 0, 'f', 2));
             curBalanceLabel->setText(QStringLiteral("当前余额：%1 元").arg(newBalance, 0, 'f', 2));
-            m_userLabel->setText(QStringLiteral("欢迎，%1 | 余额 %2 元")
-                                     .arg(m_user.value(QStringLiteral("nickname")).toString())
-                                     .arg(newBalance, 0, 'f', 2));
+            updateUserHeaderLabel();
             QMessageBox::information(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("充值成功"));
             rechargeDlg.accept();
         });
@@ -849,6 +844,8 @@ void MainWindow::onProfileCenter()
 
 void MainWindow::onOrderHistory()
 {
+    refreshUserProfile();
+
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("订单历史"));
     dlg.resize(720, 500);
@@ -1072,8 +1069,36 @@ void MainWindow::onFavoriteList()
     dlg.exec();
 }
 
+void MainWindow::updateUserHeaderLabel()
+{
+    if (!m_userLabel) return;
+    m_userLabel->setText(QStringLiteral("欢迎，%1 | 余额 %2 元")
+                             .arg(m_user.value(QStringLiteral("nickname")).toString())
+                             .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2));
+}
+
+bool MainWindow::refreshUserProfile()
+{
+    const QJsonObject resp = m_api->call(QStringLiteral("user.profile.get"), QJsonObject());
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        return false;
+    }
+
+    const QJsonObject data = resp.value(QStringLiteral("data")).toObject();
+    static const char *keys[] = {"nickname", "avatar_path", "balance", "status", "phone"};
+    for (const char *key : keys) {
+        if (data.contains(key)) {
+            m_user[key] = data.value(key);
+        }
+    }
+    updateUserHeaderLabel();
+    return true;
+}
+
 bool MainWindow::checkOpenOrder(bool failClosed)
 {
+    refreshUserProfile();
+
     const QJsonObject resp = m_api->call(QStringLiteral("order.check_open"), QJsonObject());
     if (!resp.value(QStringLiteral("ok")).toBool()) {
         if (failClosed) {
@@ -1288,6 +1313,8 @@ void MainWindow::showChargingProgress(const QString &orderNo)
 
 void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amount)
 {
+    refreshUserProfile();
+
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("订单结算"));
     dlg.resize(400, 300);
@@ -1382,11 +1409,9 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
                 return;
             }
             const double newBalance = resp.value(QStringLiteral("data")).toObject()
-                                          .value(QStringLiteral("balance_after")).toDouble();
+                                          .value(QStringLiteral("balance")).toDouble();
             m_user["balance"] = newBalance;
-            m_userLabel->setText(QStringLiteral("欢迎，%1 | 余额 %2 元")
-                                     .arg(m_user.value(QStringLiteral("nickname")).toString())
-                                     .arg(newBalance, 0, 'f', 2));
+            updateUserHeaderLabel();
             balanceLabel->setText(QStringLiteral("当前余额：%1 元").arg(newBalance, 0, 'f', 2));
             QMessageBox::information(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("充值成功"));
             rechargeDlg.accept();
@@ -1401,16 +1426,21 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
         const QJsonObject resp = m_api->call(QStringLiteral("charge.settle"), data);
         if (!resp.value(QStringLiteral("ok")).toBool()) {
             const QJsonObject err = resp.value(QStringLiteral("error")).toObject();
-            QMessageBox::warning(&dlg, QStringLiteral("结算失败"),
-                                 err.value(QStringLiteral("message")).toString());
+            const QString errMsg = err.value(QStringLiteral("message")).toString();
+            if (errMsg.contains(QStringLiteral("已结算"))) {
+                refreshUserProfile();
+                QMessageBox::information(&dlg, QStringLiteral("提示"),
+                    QStringLiteral("该订单已结算（可能已由管理员代结算），余额已刷新。"));
+                dlg.accept();
+                return;
+            }
+            QMessageBox::warning(&dlg, QStringLiteral("结算失败"), errMsg);
             return;
         }
         const double newBalance = resp.value(QStringLiteral("data")).toObject()
                                      .value(QStringLiteral("balance_after")).toDouble();
         m_user["balance"] = newBalance;
-        m_userLabel->setText(QStringLiteral("欢迎，%1 | 余额 %2 元")
-                                 .arg(m_user.value(QStringLiteral("nickname")).toString())
-                                 .arg(newBalance, 0, 'f', 2));
+        updateUserHeaderLabel();
         QMessageBox::information(&dlg, QStringLiteral("结算成功"),
             QStringLiteral("结算成功！扣除 %1 元，余额 %2 元")
                 .arg(amount, 0, 'f', 2).arg(newBalance, 0, 'f', 2));

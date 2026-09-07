@@ -10,6 +10,9 @@ public:
     // 用户登录（手机号免密）
     static QJsonObject login(const QString &id, const QJsonObject &data);
 
+    // 获取当前用户资料（含余额）
+    static QJsonObject profileGet(const QString &id, const QString &token, const QJsonObject &data);
+
     // 修改个人资料（昵称/头像）
     static QJsonObject profileUpdate(const QString &id, const QString &token, const QJsonObject &data);
 

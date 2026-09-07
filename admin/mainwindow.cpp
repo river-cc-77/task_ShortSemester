@@ -9,6 +9,8 @@
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QSet>
+#include <QDate>
+#include <QTableWidgetItem>
 
 MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent)
     : QMainWindow(parent)
@@ -47,6 +49,12 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
         ui->btnUser->setProperty("selected", true);
         ui->btnUser->setStyleSheet(ui->btnUser->styleSheet());
         ui->stackedWidget->setCurrentIndex(3);
+    });
+    connect(ui->btnOrder,&QPushButton::clicked,this,[=](){
+        resetAllBtnSelect();
+        ui->btnOrder->setProperty("selected", true);
+        ui->btnOrder->setStyleSheet(ui->btnOrder->styleSheet());
+        ui->stackedWidget->setCurrentIndex(6);
     });
     connect(ui->btnLog,&QPushButton::clicked,this,[=](){
         resetAllBtnSelect();
@@ -156,6 +164,10 @@ QPushButton:hover{
             loadStationCombo();
             reloadPileList();
         }
+        else if(index == 6)
+        {
+            reloadOrderList();
+        }
     });
 
     // 用户搜索
@@ -225,6 +237,42 @@ QPushButton:hover{
         reloadPileList();
     });
 
+    //==================== 订单管理初始化 ====================
+    ui->comboOrderStatus->addItem(QStringLiteral("全部状态"));
+    ui->comboOrderStatus->addItem(QStringLiteral("预约"));
+    ui->comboOrderStatus->addItem(QStringLiteral("充电中"));
+    ui->comboOrderStatus->addItem(QStringLiteral("待支付"));
+    ui->comboOrderStatus->addItem(QStringLiteral("已完成"));
+    ui->dateOrderFrom->setCalendarPopup(true);
+    ui->dateOrderTo->setCalendarPopup(true);
+    ui->dateOrderFrom->setDate(QDate(2026, 8, 1));
+    ui->dateOrderTo->setDate(QDate(2026, 9, 30));
+
+    ui->tableOrder->setColumnCount(9);
+    ui->tableOrder->setHorizontalHeaderLabels({
+        QStringLiteral("订单号"),
+        QStringLiteral("手机号"),
+        QStringLiteral("电站"),
+        QStringLiteral("电桩"),
+        QStringLiteral("状态"),
+        QStringLiteral("电量(kWh)"),
+        QStringLiteral("金额(元)"),
+        QStringLiteral("开始时间"),
+        QStringLiteral("操作"),
+    });
+    ui->tableOrder->verticalHeader()->setVisible(false);
+    ui->tableOrder->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ui->tableOrder->verticalHeader()->setDefaultSectionSize(44);
+    ui->tableOrder->setAlternatingRowColors(true);
+    ui->tableOrder->setStyleSheet(ui->tableUser->styleSheet());
+
+    connect(ui->btnOrderQuery, &QPushButton::clicked, this, [=]() {
+        reloadOrderList();
+    });
+    connect(ui->editOrderPhone, &QLineEdit::returnPressed, this, [=]() {
+        reloadOrderList();
+    });
+
 }
 
 MainWindow::~MainWindow()
@@ -234,7 +282,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::resetAllBtnSelect()
 {
-    auto btns = {ui->btnOverview, ui->btnPile, ui->btnStation, ui->btnUser, ui->btnLog};
+    auto btns = {ui->btnOverview, ui->btnPile, ui->btnStation, ui->btnUser, ui->btnOrder, ui->btnLog};
     for(auto btn : btns)
     {
         btn->setProperty("selected", false);
@@ -850,6 +898,129 @@ void MainWindow::onAddPileClicked()
     } else {
         const QString errMsg = resp.value("error").toObject().value("message").toString(
             QStringLiteral("新增失败"));
+        QMessageBox::warning(this, QStringLiteral("失败"), errMsg);
+    }
+}
+
+void MainWindow::reloadOrderList()
+{
+    ui->tableOrder->setRowCount(0);
+
+    QJsonObject params;
+    params["limit"] = 50;
+
+    const QString statusText = ui->comboOrderStatus->currentText();
+    if (statusText != QStringLiteral("全部状态")) {
+        params["status"] = statusText;
+    }
+
+    const QString phone = ui->editOrderPhone->text().trimmed();
+    if (!phone.isEmpty()) {
+        params["phone"] = phone;
+    }
+
+    params["date_from"] = ui->dateOrderFrom->date().toString(QStringLiteral("yyyy-MM-dd"));
+    params["date_to"] = ui->dateOrderTo->date().toString(QStringLiteral("yyyy-MM-dd"));
+
+    const QJsonObject resp = m_api->call(QStringLiteral("order.list"), params);
+    if (!resp.value("ok").toBool()) {
+        const QString errMsg = resp.value("error").toObject().value("message").toString(
+            QStringLiteral("获取订单列表失败"));
+        QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        return;
+    }
+
+    const QJsonArray items = resp.value("data").toObject().value("items").toArray();
+    for (const QJsonValue &value : items) {
+        addOrderRow(value.toObject());
+    }
+}
+
+void MainWindow::addOrderRow(const QJsonObject &obj)
+{
+    const int row = ui->tableOrder->rowCount();
+    ui->tableOrder->insertRow(row);
+
+    const QString orderNo = obj.value("order_no").toString();
+    const QString status = obj.value("status").toString();
+
+    auto *orderItem = new QTableWidgetItem(orderNo);
+    orderItem->setFlags(orderItem->flags() & ~Qt::ItemIsEditable);
+    orderItem->setData(Qt::UserRole, obj);
+    ui->tableOrder->setItem(row, 0, orderItem);
+
+    auto mkReadOnly = [](const QString &text) {
+        auto *item = new QTableWidgetItem(text);
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        return item;
+    };
+
+    ui->tableOrder->setItem(row, 1, mkReadOnly(obj.value("phone").toString()));
+    ui->tableOrder->setItem(row, 2, mkReadOnly(obj.value("station_name").toString()));
+    ui->tableOrder->setItem(row, 3, mkReadOnly(obj.value("pile_no").toString()));
+    ui->tableOrder->setItem(row, 4, mkReadOnly(status));
+    ui->tableOrder->setItem(row, 5, mkReadOnly(QString::number(obj.value("kwh").toDouble())));
+    ui->tableOrder->setItem(row, 6, mkReadOnly(QString::number(obj.value("amount").toDouble())));
+    ui->tableOrder->setItem(row, 7, mkReadOnly(obj.value("start_at").toString()));
+
+    QWidget *container = new QWidget();
+    QHBoxLayout *layout = new QHBoxLayout(container);
+    layout->setContentsMargins(4, 2, 4, 2);
+
+    QPushButton *btnDetail = new QPushButton(QStringLiteral("详情"));
+    layout->addWidget(btnDetail);
+    connect(btnDetail, &QPushButton::clicked, this, [=]() {
+        onOrderDetailClicked(obj);
+    });
+
+    if (status == QStringLiteral("待支付")) {
+        QPushButton *btnSettle = new QPushButton(QStringLiteral("代结算"));
+        layout->addWidget(btnSettle);
+        connect(btnSettle, &QPushButton::clicked, this, [=]() {
+            onOrderAdminSettle(orderNo);
+        });
+    }
+
+    ui->tableOrder->setCellWidget(row, 8, container);
+}
+
+void MainWindow::onOrderDetailClicked(const QJsonObject &order)
+{
+    OrderDetailDialog dlg(this);
+    dlg.setOrder(order);
+    connect(&dlg, &OrderDetailDialog::adminSettleRequested, this, [this, &dlg](const QString &orderNo) {
+        dlg.accept();
+        onOrderAdminSettle(orderNo);
+    });
+    dlg.exec();
+}
+
+void MainWindow::onOrderAdminSettle(const QString &orderNo)
+{
+    if (orderNo.isEmpty()) {
+        return;
+    }
+
+    const auto ret = QMessageBox::question(
+        this,
+        QStringLiteral("代结算确认"),
+        QStringLiteral("确定代用户结算订单 %1 吗？").arg(orderNo),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (ret != QMessageBox::Yes) {
+        return;
+    }
+
+    const QJsonObject resp = m_api->call(
+        QStringLiteral("order.admin.settle"),
+        QJsonObject{{"order_no", orderNo}});
+    if (resp.value("ok").toBool()) {
+        QMessageBox::information(this, QStringLiteral("成功"), QStringLiteral("代结算完成"));
+        reloadOrderList();
+        reloadOverviewStat();
+    } else {
+        const QString errMsg = resp.value("error").toObject().value("message").toString(
+            QStringLiteral("代结算失败"));
         QMessageBox::warning(this, QStringLiteral("失败"), errMsg);
     }
 }

@@ -7,6 +7,7 @@
 #include "pileeditdialog.h"
 #include "pilestatusdialog.h"
 #include "pileadddialog.h"
+#include "orderdetaildialog.h"
 class ApiClient;
 namespace Ui {
 class MainWindow;
@@ -36,6 +37,11 @@ private slots:
     QString getSingleSelectedPileNo() const;
     void goToSelectedPileStatus();
     void onAddPileClicked();
+
+    void reloadOrderList();
+    void addOrderRow(const QJsonObject &obj);
+    void onOrderDetailClicked(const QJsonObject &order);
+    void onOrderAdminSettle(const QString &orderNo);
 
     // 电桩编辑弹窗槽函数
     void onEditPileBtnClicked(const QString& pileNo);

@@ -101,6 +101,9 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
     }
 
     // ===== 用户相关 =====
+    if (cmd == "user.profile.get") {
+        return UserHandler::profileGet(id, token, data);
+    }
     if (cmd == "user.profile.update") {
         return UserHandler::profileUpdate(id, token, data);
     }

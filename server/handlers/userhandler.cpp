@@ -74,6 +74,23 @@ QJsonObject UserHandler::login(const QString &id, const QJsonObject &data)
 }
 
 // ============================================================
+// user.profile.get — 获取当前用户资料
+// ============================================================
+QJsonObject UserHandler::profileGet(const QString &id, const QString &token, const QJsonObject &data)
+{
+    Q_UNUSED(data);
+    SessionInfo session;
+    const QJsonObject auth = authUser(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    const auto userOpt = DbManager::instance().findUserById(session.userId);
+    if (!userOpt.has_value()) {
+        return Protocol::makeError(id, "NOT_FOUND", "用户不存在");
+    }
+    return Protocol::makeSuccess(id, userOpt.value());
+}
+
+// ============================================================
 // user.profile.update — 修改昵称/头像
 // ============================================================
 QJsonObject UserHandler::profileUpdate(const QString &id, const QString &token, const QJsonObject &data)

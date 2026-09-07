@@ -117,6 +117,7 @@
 | `charge.stop` | 用户端 | P1 | 停止充电 |
 | `charge.settle` | 用户端/管理端 | P1 | 结算订单 |
 | `charge.progress` | 用户端 | P1 | 查询充电进度 |
+| `user.profile.get` | 用户端 | P1 | 获取当前用户资料（含余额） |
 | `user.profile.update` | 用户端 | P1 | 改昵称/头像 |
 | `user.recharge` | 用户端 | P1 | 余额充值 |
 | `stats.overview` | 管理端 | P1 | 数据总览 KPI + 图表 |
@@ -464,7 +465,29 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.10 `user.profile.update`
+### 4.10 `user.profile.get`
+
+获取当前登录用户的资料，用于客户端同步余额等字段（如管理端代结算后刷新本地缓存）。
+
+**请求 data：** `{}`（可省略）
+
+**响应 data：** 与 `user.login` 中用户对象字段一致（不含 `token`），例如：
+
+```json
+{
+  "user_id": 1,
+  "phone": "13800138000",
+  "nickname": "用户8000",
+  "avatar_path": "",
+  "balance": 56.5,
+  "status": "正常",
+  "created_at": "2026-08-01 10:00:00"
+}
+```
+
+---
+
+### 4.11 `user.profile.update`
 
 **请求 data：**
 
@@ -476,7 +499,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.11 `user.recharge`
+### 4.12 `user.recharge`
 
 模拟充值，无真实支付。
 
@@ -488,7 +511,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.12 `order.list`
+### 4.13 `order.list`
 
 **用户端请求 data：** `{ "status": "", "limit": 20 }`  
 **管理端可额外传：** `{ "phone": "", "date_from": "2026-08-01", "date_to": "2026-08-28" }`
@@ -512,7 +535,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.13 `stats.overview`
+### 4.14 `stats.overview`
 
 管理端数据总览。
 
@@ -545,7 +568,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.14 `pile.list`
+### 4.15 `pile.list`
 
 **请求 data：**
 
@@ -571,7 +594,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.15 `pile.restart`
+### 4.16 `pile.restart`
 
 **请求 data：** `{ "pile_no": "SZ001-03" }`
 
@@ -585,7 +608,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.16 `pile.detail`
+### 4.17 `pile.detail`
 
 **请求 data：** `{ "pile_no": "SZ001-03" }`
 
@@ -617,7 +640,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.17 `pile.create`
+### 4.18 `pile.create`
 
 **请求 data：**
 
@@ -648,7 +671,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.18 `station.admin.list` / `station.create`
+### 4.19 `station.admin.list` / `station.create`
 
 **list 响应 items[]：** id, name, address, lat, lng, price, total_piles, idle_piles, online_rate, created_at
 
@@ -670,7 +693,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.19 `user.admin.list` / `user.freeze`
+### 4.20 `user.admin.list` / `user.freeze`
 
 **list 请求 data：** `{ "phone_keyword": "138" }`
 
@@ -681,7 +704,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.20 `order.admin.settle`
+### 4.21 `order.admin.settle`
 
 管理员代用户结算待支付订单。逻辑同 `charge.settle`，须写 `operation_log`。
 

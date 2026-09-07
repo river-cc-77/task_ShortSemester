@@ -177,6 +177,14 @@ def main() -> int:
     pile_no = piles[0]["pile_no"]
 
     # ===== 用户资料 & 充值 =====
+    profile = run_test(
+        host, port,
+        {"id": "8a", "cmd": "user.profile.get", "token": token, "data": {}},
+        "user.profile.get",
+    )
+    if "balance" not in profile.get("data", {}):
+        raise RuntimeError("user.profile.get missing balance")
+
     run_test(
         host, port,
         {"id": "8", "cmd": "user.profile.update", "token": token,
