@@ -363,23 +363,30 @@ def main() -> int:
         host, port,
         {"id": "29", "cmd": "user.freeze", "token": admin_token,
          "data": {"user_id": 2, "freeze": True}},
-        "user.freeze",
+        "user.freeze 8002 blocked (待支付 open order)",
+        expect_ok=False,
     )
     run_test(
         host, port,
-        {"id": "30", "cmd": "user.login", "data": {"phone": "13800138002"}},
-        "user.login after freeze", expect_ok=False,
+        {"id": "29b", "cmd": "user.freeze", "token": admin_token,
+         "data": {"user_id": 3, "freeze": True}},
+        "user.freeze 8003",
+    )
+    run_test(
+        host, port,
+        {"id": "30", "cmd": "user.login", "data": {"phone": "13800138003"}},
+        "user.login after freeze 8003", expect_ok=False,
     )
     run_test(
         host, port,
         {"id": "31", "cmd": "user.freeze", "token": admin_token,
-         "data": {"user_id": 2, "freeze": False}},
-        "user.unfreeze",
+         "data": {"user_id": 3, "freeze": False}},
+        "user.unfreeze 8003",
     )
     user8002 = run_test(
         host, port,
         {"id": "32", "cmd": "user.login", "data": {"phone": "13800138002"}},
-        "user.login 8002 after unfreeze (pending order)",
+        "user.login 8002 (pending order, never frozen)",
     )
     token8002 = user8002["data"]["token"]
 
