@@ -244,6 +244,13 @@ def test_admin_dashboard_api(host: str, port: int, admin_token: str) -> None:
         if status_key not in pile_status:
             raise RuntimeError(f"pile_status missing {status_key} (admin UI expects all four)")
 
+    trend = data.get("revenue_trend")
+    if not isinstance(trend, list) or len(trend) != 7:
+        raise RuntimeError(f"revenue_trend should be a list of 7 days, got {len(trend) if isinstance(trend, list) else type(trend)}")
+    for item in trend:
+        if "date" not in item or "revenue" not in item:
+            raise RuntimeError("revenue_trend item missing date/revenue")
+
     run_test(
         host,
         port,

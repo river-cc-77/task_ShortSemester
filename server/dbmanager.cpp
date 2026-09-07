@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -1254,22 +1255,32 @@ QJsonObject DbManager::fetchStatsOverview(int days)
         result["user_count"] = 0;
     }
 
-    // 营收趋势（近 N 天）
-    QJsonArray trend;
+    // 营收趋势（近 N 天，连续日历日；无订单日记 revenue=0）
+    const int span = (days == 30) ? 30 : 7;
+    QHash<QString, double> revenueByDate;
     QSqlQuery trendQuery(m_db);
     trendQuery.prepare(
         "SELECT date(created_at) AS d, COALESCE(SUM(amount),0) AS revenue "
         "FROM charge_order WHERE status = '已完成' "
         "AND date(created_at) >= date('now','localtime', :offset) "
         "GROUP BY date(created_at) ORDER BY d");
-    trendQuery.bindValue(":offset", QString("-%1 days").arg(days - 1));
+    trendQuery.bindValue(":offset", QString("-%1 days").arg(span - 1));
     if (trendQuery.exec()) {
         while (trendQuery.next()) {
-            QJsonObject day;
-            day["date"] = trendQuery.value("d").toString();
-            day["revenue"] = trendQuery.value("revenue").toDouble();
-            trend.append(day);
+            revenueByDate.insert(trendQuery.value("d").toString(),
+                                 trendQuery.value("revenue").toDouble());
         }
+    }
+
+    QJsonArray trend;
+    const QDate endDate = QDate::currentDate();
+    const QDate startDate = endDate.addDays(-(span - 1));
+    for (QDate d = startDate; d <= endDate; d = d.addDays(1)) {
+        const QString dateStr = d.toString(QStringLiteral("yyyy-MM-dd"));
+        QJsonObject day;
+        day["date"] = dateStr;
+        day["revenue"] = revenueByDate.value(dateStr, 0.0);
+        trend.append(day);
     }
     result["revenue_trend"] = trend;
 

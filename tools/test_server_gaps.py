@@ -446,6 +446,21 @@ def test_low_priority(host: str, port: int, token: str, admin_token: str) -> Non
             raise RuntimeError(f"stats.overview missing field: {key}")
     if not isinstance(data["revenue_trend"], list):
         raise RuntimeError("revenue_trend should be a list")
+    trend = data["revenue_trend"]
+    if len(trend) != 7:
+        raise RuntimeError(f"revenue_trend should have 7 entries for days=7, got {len(trend)}")
+    for item in trend:
+        if "date" not in item or "revenue" not in item:
+            raise RuntimeError("revenue_trend item missing date/revenue")
+
+    stats30 = run_test(
+        host, port,
+        {"id": "G4b", "cmd": "stats.overview", "token": admin_token, "data": {"days": 30}},
+        "stats.overview days=30 trend length",
+    )
+    trend30 = stats30["data"]["revenue_trend"]
+    if len(trend30) != 30:
+        raise RuntimeError(f"revenue_trend should have 30 entries for days=30, got {len(trend30)}")
 
 
 def main() -> int:

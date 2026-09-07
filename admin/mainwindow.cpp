@@ -744,55 +744,77 @@ void MainWindow::drawRevenueChartFromJson(const QJsonArray &trendArr)
     m_chart->clearGraphs();
     m_chart->xAxis->setTicker(QSharedPointer<QCPAxisTicker>(new QCPAxisTicker));
 
-    QVector<double> x,y;
+    if (trendArr.isEmpty()) {
+        qDebug() << "revenue_trend 为空，显示暂无数据";
+        if (m_chartTitle) {
+            m_chartTitle->setText(QStringLiteral("营收趋势 / 万元（暂无数据）"));
+        }
+        m_chart->xAxis->setLabel(QStringLiteral("日期"));
+        m_chart->yAxis->setLabel(QStringLiteral("营收(万元)"));
+        m_chart->xAxis->setRange(0, 1);
+        m_chart->yAxis->setRange(0, 1);
+        m_chart->replot();
+        return;
+    }
+
+    QVector<double> x, y;
     QStringList labels;
 
-    if(!trendArr.isEmpty())
-    {
-        qDebug()<<"使用服务端真实数据绘图，条数："<<trendArr.size();
-        for(const auto& item : trendArr)
-        {
-            QJsonObject obj = item.toObject();
-            QString dateStr = obj["date"].toString();
-            double revenueYuan = obj["revenue"].toDouble();
-            double revenueWan = revenueYuan / 10000.0;
-
-            labels << dateStr.mid(5);
-            x.append(x.size());
-            y.append(revenueWan);
+    qDebug() << "使用服务端趋势数据绘图，条数：" << trendArr.size();
+    for (const auto &item : trendArr) {
+        const QJsonObject obj = item.toObject();
+        const QString dateStr = obj.value(QStringLiteral("date")).toString();
+        if (dateStr.isEmpty()) {
+            continue;
         }
-    }
-    else
-    {
-        qDebug()<<"服务端无数据，生成"<<m_currentDays<<"天y=0基线，x轴显示1到"<<m_currentDays;
+        const double revenueWan = obj.value(QStringLiteral("revenue")).toDouble() / 10000.0;
 
-        for(int i=0;i<m_currentDays;i++)
-        {
-            x.append(i);
-            y.append(0.0);
-            labels << QString::number(i + 1); // 1、2、3...30
-        }
+        labels << (dateStr.length() >= 10 ? dateStr.mid(5) : dateStr);
+        x.append(x.size());
+        y.append(revenueWan);
     }
 
-    QCPGraph* graph = m_chart->addGraph();
-    graph->setData(x,y);
-    graph->setPen(QPen(QColor(0x4078d8),2));
+    if (x.isEmpty()) {
+        if (m_chartTitle) {
+            m_chartTitle->setText(QStringLiteral("营收趋势 / 万元（暂无数据）"));
+        }
+        m_chart->xAxis->setLabel(QStringLiteral("日期"));
+        m_chart->yAxis->setLabel(QStringLiteral("营收(万元)"));
+        m_chart->xAxis->setRange(0, 1);
+        m_chart->yAxis->setRange(0, 1);
+        m_chart->replot();
+        return;
+    }
+
+    QCPGraph *graph = m_chart->addGraph();
+    graph->setData(x, y);
+    graph->setPen(QPen(QColor(0x4078d8), 2));
     QCPScatterStyle circleStyle(QCPScatterStyle::ssCircle);
     circleStyle.setSize(4);
     graph->setScatterStyle(circleStyle);
 
     QSharedPointer<QCPAxisTickerText> ticker(new QCPAxisTickerText());
-    for(int i=0;i<x.size();i++)
-    {
+    for (int i = 0; i < x.size(); ++i) {
         ticker->addTick(x[i], labels[i]);
     }
     m_chart->xAxis->setTicker(ticker.template staticCast<QCPAxisTicker>());
 
-    m_chart->xAxis->setLabel("日期");
-    m_chart->yAxis->setLabel("营收(万元)");
-    m_chartTitle->setText("营收趋势");
+    m_chart->xAxis->setLabel(QStringLiteral("日期"));
+    m_chart->yAxis->setLabel(QStringLiteral("营收(万元)"));
+    if (m_chartTitle) {
+        m_chartTitle->setText(QStringLiteral("营收趋势 / 万元"));
+    }
 
     m_chart->rescaleAxes();
+    double maxY = 0.0;
+    for (double v : y) {
+        if (v > maxY) {
+            maxY = v;
+        }
+    }
+    if (maxY <= 0.0) {
+        m_chart->yAxis->setRange(0, 0.01);
+    }
     m_chart->replot();
 }
 
