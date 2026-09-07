@@ -19,6 +19,9 @@ QJsonObject authUser(const QString &id, const QString &token, SessionInfo &sessi
     if (!DbManager::instance().isOpen()) {
         return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
     }
+    if (DbManager::instance().isUserFrozen(session.userId)) {
+        return Protocol::makeError(id, "USER_FROZEN", "账号已被冻结，请联系客服");
+    }
     return {};
 }
 

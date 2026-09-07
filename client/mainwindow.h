@@ -37,6 +37,7 @@ private:
     QJsonObject geocodeByBaidu(const QString &address);// 调用百度地图地理编码 API，返回 {lat, lng}，失败返回空对象
     bool refreshUserProfile();   // 从服务端同步用户资料（含余额）
     void updateUserHeaderLabel(); // 刷新顶部欢迎/余额栏
+    QJsonObject fetchOrderByNo(const QString &orderNo); // 从服务端拉取最新订单快照
     bool checkOpenOrder(bool failClosed = false);   // 检查未完成订单，有则弹窗提示并返回 true
     void showChargingProgress(const QString &orderNo);   // 充电中页面
     void showSettleDialog(const QString &orderNo, double kwh, double amount);  // 结算页面

@@ -21,6 +21,9 @@ QJsonObject authUser(const QString &id, const QString &token, SessionInfo &sessi
     if (!DbManager::instance().isOpen()) {
         return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
     }
+    if (DbManager::instance().isUserFrozen(session.userId)) {
+        return Protocol::makeError(id, "USER_FROZEN", "账号已被冻结，请联系客服");
+    }
     return {};
 }
 
@@ -46,6 +49,10 @@ QJsonObject authUserOrAdmin(const QString &id, const QString &token, SessionInfo
     }
     if (!DbManager::instance().isOpen()) {
         return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
+    }
+    if (session.role == QStringLiteral("user")
+        && DbManager::instance().isUserFrozen(session.userId)) {
+        return Protocol::makeError(id, "USER_FROZEN", "账号已被冻结，请联系客服");
     }
     return {};
 }
@@ -231,6 +238,9 @@ QJsonObject StationHandler::update(const QString &id, const QString &token, cons
         return Protocol::makeError(id, "NOT_FOUND", "电站不存在");
     }
 
+    const QJsonObject stationObj = detailOpt->value(QStringLiteral("station")).toObject();
+    const double oldPrice = stationObj.value(QStringLiteral("price")).toDouble();
+
     const QString name = data.value("name").toString().trimmed();
     const QString address = data.value("address").toString().trimmed();
     const double lat = data.value("lat").toDouble();
@@ -245,6 +255,10 @@ QJsonObject StationHandler::update(const QString &id, const QString &token, cons
     }
     if (DbManager::instance().stationNameExists(name, stationId)) {
         return Protocol::makeError(id, "INVALID_PARAM", "站名已存在");
+    }
+    if (qAbs(price - oldPrice) > 0.001
+        && DbManager::instance().stationHasOpenOrders(stationId)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "该电站存在未完成订单，无法修改电价");
     }
 
     if (!DbManager::instance().updateStation(stationId, name, address, lat, lng, price)) {

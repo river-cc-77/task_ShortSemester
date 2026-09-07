@@ -25,6 +25,7 @@ public:
     std::optional<double> rechargeUser(int userId, double amount);
     QJsonArray fetchAdminUsers(const QString &phoneKeyword);
     bool freezeUser(int userId, bool freeze);
+    bool isUserFrozen(int userId) const;
 
     // ===== 管理员 =====
     std::optional<QJsonObject> findAdminByUsername(const QString &username);
@@ -46,7 +47,8 @@ public:
 
     // ===== 电桩 =====
     std::optional<QJsonObject> findPileByNo(const QString &pileNo);
-    bool updatePileStatus(int pileId, const QString &status);
+    bool updatePileStatus(int pileId, const QString &status,
+                          const QString &expectedStatus = QString());
     QJsonArray fetchPiles(int stationId, const QString &status, const QString &keyword);
     bool restartPile(const QString &pileNo);
     bool updatePile(const QString &pileNo, const QString &type,

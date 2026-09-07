@@ -81,9 +81,11 @@ CREATE TABLE IF NOT EXISTS charge_order (
     reserve_at TEXT,
     start_at   TEXT,
     end_at     TEXT,
-    kwh        REAL    NOT NULL DEFAULT 0 CHECK (kwh >= 0),
-    amount     REAL    NOT NULL DEFAULT 0 CHECK (amount >= 0),
-    created_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+    kwh           REAL    NOT NULL DEFAULT 0 CHECK (kwh >= 0),
+    amount        REAL    NOT NULL DEFAULT 0 CHECK (amount >= 0),
+    bill_price    REAL,   -- 开始充电时快照电价，避免中途改价影响计费
+    bill_power_kw REAL,   -- 开始充电时快照功率
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_order_user ON charge_order (user_id);

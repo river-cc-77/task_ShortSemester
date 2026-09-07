@@ -23,6 +23,9 @@ QJsonObject authUser(const QString &id, const QString &token, SessionInfo &sessi
     if (!DbManager::instance().isOpen()) {
         return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
     }
+    if (DbManager::instance().isUserFrozen(session.userId)) {
+        return Protocol::makeError(id, "USER_FROZEN", "账号已被冻结，请联系客服");
+    }
     return {};
 }
 
@@ -35,10 +38,14 @@ QJsonObject authUserOrAdmin(const QString &id, const QString &token, SessionInfo
     if (!DbManager::instance().isOpen()) {
         return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
     }
+    if (session.role == QStringLiteral("user")
+        && DbManager::instance().isUserFrozen(session.userId)) {
+        return Protocol::makeError(id, "USER_FROZEN", "账号已被冻结，请联系客服");
+    }
     return {};
 }
 
-// 计算充电费用：kwh = power_kw × elapsed_seconds / 3600, amount = round(kwh × price, 2)
+// 计算充电费用
 void calcCharge(const QJsonObject &order, double &kwh, double &amount,
                 qint64 &elapsedSeconds)
 {

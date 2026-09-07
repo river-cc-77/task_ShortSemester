@@ -897,8 +897,14 @@ void MainWindow::onOrderHistory()
     // 点击列表项 → 弹出订单详情
     connect(listWidget, &QListWidget::itemClicked, &dlg, [&](QListWidgetItem *item) {
         if (!item || item->data(Qt::UserRole).isNull()) return;
-        const QJsonObject order = QJsonObject::fromVariantMap(item->data(Qt::UserRole).toMap());
-        const QString orderNo = order.value(QStringLiteral("order_no")).toString();
+
+        const QJsonObject cached = QJsonObject::fromVariantMap(item->data(Qt::UserRole).toMap());
+        const QString orderNo = cached.value(QStringLiteral("order_no")).toString();
+        QJsonObject order = fetchOrderByNo(orderNo);
+        if (order.isEmpty()) {
+            order = cached;
+        }
+
         const QString status = order.value(QStringLiteral("status")).toString();
         const double kwh = order.value(QStringLiteral("kwh")).toDouble();
         const double amount = order.value(QStringLiteral("amount")).toDouble();
@@ -1095,9 +1101,46 @@ bool MainWindow::refreshUserProfile()
     return true;
 }
 
+QJsonObject MainWindow::fetchOrderByNo(const QString &orderNo)
+{
+    if (orderNo.isEmpty()) {
+        return {};
+    }
+
+    const QJsonObject checkResp = m_api->call(QStringLiteral("order.check_open"), QJsonObject());
+    if (checkResp.value(QStringLiteral("ok")).toBool()) {
+        const QJsonObject data = checkResp.value(QStringLiteral("data")).toObject();
+        if (data.value(QStringLiteral("has_open")).toBool()) {
+            const QJsonObject openOrder = data.value(QStringLiteral("order")).toObject();
+            if (openOrder.value(QStringLiteral("order_no")).toString() == orderNo) {
+                return openOrder;
+            }
+        }
+    }
+
+    QJsonObject listReq;
+    listReq[QStringLiteral("limit")] = 200;
+    const QJsonObject listResp = m_api->call(QStringLiteral("order.list"), listReq);
+    if (!listResp.value(QStringLiteral("ok")).toBool()) {
+        return {};
+    }
+    const QJsonArray items = listResp.value(QStringLiteral("data")).toObject()
+                                .value(QStringLiteral("items")).toArray();
+    for (const QJsonValue &val : items) {
+        const QJsonObject order = val.toObject();
+        if (order.value(QStringLiteral("order_no")).toString() == orderNo) {
+            return order;
+        }
+    }
+    return {};
+}
+
 bool MainWindow::checkOpenOrder(bool failClosed)
 {
-    refreshUserProfile();
+    if (!refreshUserProfile() && failClosed) {
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("无法刷新账户信息，请稍后重试"));
+    }
 
     const QJsonObject resp = m_api->call(QStringLiteral("order.check_open"), QJsonObject());
     if (!resp.value(QStringLiteral("ok")).toBool()) {
@@ -1108,6 +1151,8 @@ bool MainWindow::checkOpenOrder(bool failClosed)
                                      QStringLiteral("无法检查未完成订单，请稍后重试")));
             return true;
         }
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("无法检查未完成订单，请确认网络连接"));
         return false;
     }
 
@@ -1191,6 +1236,16 @@ bool MainWindow::checkOpenOrder(bool failClosed)
                 }
             }
         }
+    }
+
+    if (!handled) {
+        return true;
+    }
+
+    const QJsonObject recheck = m_api->call(QStringLiteral("order.check_open"), QJsonObject());
+    if (recheck.value(QStringLiteral("ok")).toBool()) {
+        return recheck.value(QStringLiteral("data")).toObject()
+            .value(QStringLiteral("has_open")).toBool();
     }
     return true;
 }
@@ -1313,7 +1368,22 @@ void MainWindow::showChargingProgress(const QString &orderNo)
 
 void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amount)
 {
-    refreshUserProfile();
+    if (!refreshUserProfile()) {
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("无法刷新账户余额，请确认网络连接"));
+    }
+
+    QJsonObject liveOrder = fetchOrderByNo(orderNo);
+    if (!liveOrder.isEmpty()) {
+        kwh = liveOrder.value(QStringLiteral("kwh")).toDouble(kwh);
+        amount = liveOrder.value(QStringLiteral("amount")).toDouble(amount);
+        if (liveOrder.value(QStringLiteral("status")).toString() == QStringLiteral("已完成")) {
+            refreshUserProfile();
+            QMessageBox::information(this, QStringLiteral("提示"),
+                QStringLiteral("该订单已结算（可能已由管理员代结算），余额已刷新。"));
+            return;
+        }
+    }
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("订单结算"));
@@ -1359,6 +1429,9 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
     lay->addLayout(btnRow);
 
     connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+    connect(&dlg, &QDialog::finished, this, [this](int) {
+        refreshUserProfile();
+    });
 
     connect(rechargeBtn, &QPushButton::clicked, &dlg, [&]() {
         QDialog rechargeDlg(&dlg);
@@ -1421,6 +1494,11 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
     });
 
     connect(settleBtn, &QPushButton::clicked, &dlg, [&]() {
+        const QJsonObject latest = fetchOrderByNo(orderNo);
+        const double settleAmount = latest.isEmpty()
+            ? amount
+            : latest.value(QStringLiteral("amount")).toDouble(amount);
+
         QJsonObject data;
         data["order_no"] = orderNo;
         const QJsonObject resp = m_api->call(QStringLiteral("charge.settle"), data);
@@ -1437,13 +1515,13 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
             QMessageBox::warning(&dlg, QStringLiteral("结算失败"), errMsg);
             return;
         }
-        const double newBalance = resp.value(QStringLiteral("data")).toObject()
-                                     .value(QStringLiteral("balance_after")).toDouble();
+        const QJsonObject respData = resp.value(QStringLiteral("data")).toObject();
+        const double newBalance = respData.value(QStringLiteral("balance_after")).toDouble();
         m_user["balance"] = newBalance;
         updateUserHeaderLabel();
         QMessageBox::information(&dlg, QStringLiteral("结算成功"),
             QStringLiteral("结算成功！扣除 %1 元，余额 %2 元")
-                .arg(amount, 0, 'f', 2).arg(newBalance, 0, 'f', 2));
+                .arg(settleAmount, 0, 'f', 2).arg(newBalance, 0, 'f', 2));
         dlg.accept();
     });
 

@@ -56,6 +56,12 @@ bool DbManager::open()
 
     QSqlQuery pragma(m_db);
     pragma.exec("PRAGMA foreign_keys = ON");
+
+    // 兼容旧库：补充电价/功率快照列
+    QSqlQuery migrate(m_db);
+    migrate.exec("ALTER TABLE charge_order ADD COLUMN bill_price REAL");
+    migrate.exec("ALTER TABLE charge_order ADD COLUMN bill_power_kw REAL");
+
     return true;
 }
 
@@ -240,7 +246,18 @@ bool DbManager::freezeUser(int userId, bool freeze)
     query.prepare("UPDATE user SET status = :status WHERE id = :id");
     query.bindValue(":status", freeze ? QStringLiteral("冻结") : QStringLiteral("正常"));
     query.bindValue(":id", userId);
-    return query.exec();
+    return query.exec() && query.numRowsAffected() > 0;
+}
+
+bool DbManager::isUserFrozen(int userId) const
+{
+    QSqlQuery query(m_db);
+    query.prepare("SELECT status FROM user WHERE id = :id");
+    query.bindValue(":id", userId);
+    if (!query.exec() || !query.next()) {
+        return false;
+    }
+    return query.value(0).toString() == QStringLiteral("冻结");
 }
 
 // ============================================================
@@ -376,8 +393,7 @@ QJsonArray DbManager::fetchAdminStations()
     query.prepare(
         "SELECT s.id, s.name, s.address, s.lat, s.lng, s.price, s.created_at, "
         "(SELECT COUNT(*) FROM pile p WHERE p.station_id = s.id) AS total_piles, "
-        "(SELECT COUNT(*) FROM pile p WHERE p.station_id = s.id AND p.status = '闲置') AS idle_piles, "
-        "(SELECT COUNT(*) FROM pile p WHERE p.station_id = s.id AND p.status != '故障') AS online_piles "
+        "(SELECT COUNT(*) FROM pile p WHERE p.station_id = s.id AND p.status = '闲置') AS idle_piles "
         "FROM station s ORDER BY s.id");
 
     QJsonArray items;
@@ -397,8 +413,8 @@ QJsonArray DbManager::fetchAdminStations()
         row["total_piles"] = query.value("total_piles").toInt();
         row["idle_piles"] = query.value("idle_piles").toInt();
         const int total = query.value("total_piles").toInt();
-        const int online = query.value("online_piles").toInt();
-        row["online_rate"] = total > 0 ? qRound(online * 1000.0 / total) / 1000.0 : 0.0;
+        const int idle = query.value("idle_piles").toInt();
+        row["online_rate"] = total > 0 ? qRound(idle * 1000.0 / total) / 1000.0 : 0.0;
         row["created_at"] = query.value("created_at").toString();
         items.append(row);
     }
@@ -416,7 +432,8 @@ bool DbManager::stationNameExists(const QString &name, int excludeStationId)
     }
     query.bindValue(":name", name);
     if (!query.exec() || !query.next()) {
-        return false;
+        qWarning() << "stationNameExists query failed:" << query.lastError().text();
+        return true;
     }
     return query.value(0).toInt() > 0;
 }
@@ -445,7 +462,8 @@ bool DbManager::stationHasOpenOrders(int stationId)
         "WHERE station_id = :sid AND status IN ('预约', '充电中', '待支付')");
     query.bindValue(":sid", stationId);
     if (!query.exec() || !query.next()) {
-        return false;
+        qWarning() << "stationHasOpenOrders query failed:" << query.lastError().text();
+        return true;
     }
     return query.value(0).toInt() > 0;
 }
@@ -458,7 +476,8 @@ bool DbManager::stationHasBusyPiles(int stationId)
         "WHERE station_id = :sid AND status IN ('预约', '在用')");
     query.bindValue(":sid", stationId);
     if (!query.exec() || !query.next()) {
-        return false;
+        qWarning() << "stationHasBusyPiles query failed:" << query.lastError().text();
+        return true;
     }
     return query.value(0).toInt() > 0;
 }
@@ -469,7 +488,8 @@ bool DbManager::stationHasAnyOrders(int stationId)
     query.prepare("SELECT COUNT(*) FROM charge_order WHERE station_id = :sid");
     query.bindValue(":sid", stationId);
     if (!query.exec() || !query.next()) {
-        return false;
+        qWarning() << "stationHasAnyOrders query failed:" << query.lastError().text();
+        return true;
     }
     return query.value(0).toInt() > 0;
 }
@@ -508,44 +528,62 @@ int DbManager::createStation(const QString &name, const QString &address,
                               double lat, double lng, double price,
                               int fastCount, int slowCount)
 {
-    QSqlQuery query(m_db);
-    query.prepare(
-        "INSERT INTO station (name, address, lat, lng, price) "
-        "VALUES (:name, :address, :lat, :lng, :price)");
-    query.bindValue(":name", name);
-    query.bindValue(":address", address);
-    query.bindValue(":lat", lat);
-    query.bindValue(":lng", lng);
-    query.bindValue(":price", price);
+    int stationId = -1;
+    int createdCount = 0;
+    const int expectedCount = fastCount + slowCount;
 
-    if (!query.exec()) {
-        qWarning() << "createStation failed:" << query.lastError().text();
+    const bool ok = runInTransaction([&]() {
+        QSqlQuery query(m_db);
+        query.prepare(
+            "INSERT INTO station (name, address, lat, lng, price) "
+            "VALUES (:name, :address, :lat, :lng, :price)");
+        query.bindValue(":name", name);
+        query.bindValue(":address", address);
+        query.bindValue(":lat", lat);
+        query.bindValue(":lng", lng);
+        query.bindValue(":price", price);
+
+        if (!query.exec()) {
+            qWarning() << "createStation failed:" << query.lastError().text();
+            return false;
+        }
+
+        stationId = query.lastInsertId().toInt();
+        const QString prefix = QString("SZ%1").arg(stationId, 3, 10, QChar('0'));
+        int pileIndex = 1;
+
+        auto createPiles = [&](int count, const QString &type, double power) {
+            for (int i = 0; i < count; ++i) {
+                const QString pileNo = QString("%1-%2").arg(prefix).arg(pileIndex++, 2, 10, QChar('0'));
+                QSqlQuery pq(m_db);
+                pq.prepare("INSERT INTO pile (pile_no, station_id, type, power_kw, status) "
+                           "VALUES (:no, :sid, :type, :power, '闲置')");
+                pq.bindValue(":no", pileNo);
+                pq.bindValue(":sid", stationId);
+                pq.bindValue(":type", type);
+                pq.bindValue(":power", power);
+                if (!pq.exec()) {
+                    qWarning() << "createStation pile insert failed:" << pq.lastError().text();
+                    return false;
+                }
+                ++createdCount;
+            }
+            return true;
+        };
+
+        if (!createPiles(fastCount, QStringLiteral("快充"), 120.0)) {
+            return false;
+        }
+        if (!createPiles(slowCount, QStringLiteral("慢充"), 7.0)) {
+            return false;
+        }
+        return expectedCount == 0 || createdCount == expectedCount;
+    });
+
+    if (!ok) {
+        qWarning() << "createStation rolled back, piles created:" << createdCount << "/" << expectedCount;
         return -1;
     }
-
-    const int stationId = query.lastInsertId().toInt();
-
-    // 自动生成电桩编号
-    const QString prefix = QString("ST%1").arg(stationId, 3, 10, QChar('0'));
-    int pileIndex = 1;
-
-    auto createPiles = [&](int count, const QString &type, double power) {
-        for (int i = 0; i < count; ++i) {
-            const QString pileNo = QString("%1-%2").arg(prefix).arg(pileIndex++, 2, 10, QChar('0'));
-            QSqlQuery pq(m_db);
-            pq.prepare("INSERT INTO pile (pile_no, station_id, type, power_kw, status) "
-                       "VALUES (:no, :sid, :type, :power, '闲置')");
-            pq.bindValue(":no", pileNo);
-            pq.bindValue(":sid", stationId);
-            pq.bindValue(":type", type);
-            pq.bindValue(":power", power);
-            pq.exec();
-        }
-    };
-
-    createPiles(fastCount, QStringLiteral("快充"), 120.0);
-    createPiles(slowCount, QStringLiteral("慢充"), 7.0);
-
     return stationId;
 }
 
@@ -580,13 +618,26 @@ std::optional<QJsonObject> DbManager::findPileByNo(const QString &pileNo)
     return pile;
 }
 
-bool DbManager::updatePileStatus(int pileId, const QString &status)
+bool DbManager::updatePileStatus(int pileId, const QString &status,
+                                 const QString &expectedStatus)
 {
     QSqlQuery query(m_db);
-    query.prepare("UPDATE pile SET status = :status, updated_at = datetime('now','localtime') WHERE id = :id");
+    if (expectedStatus.isEmpty()) {
+        query.prepare(
+            "UPDATE pile SET status = :status, updated_at = datetime('now','localtime') "
+            "WHERE id = :id");
+    } else {
+        query.prepare(
+            "UPDATE pile SET status = :status, updated_at = datetime('now','localtime') "
+            "WHERE id = :id AND status = :expected");
+        query.bindValue(":expected", expectedStatus);
+    }
     query.bindValue(":status", status);
     query.bindValue(":id", pileId);
-    return query.exec();
+    if (!query.exec()) {
+        return false;
+    }
+    return expectedStatus.isEmpty() || query.numRowsAffected() > 0;
 }
 
 QJsonArray DbManager::fetchPiles(int stationId, const QString &status, const QString &keyword)
@@ -682,16 +733,13 @@ QString DbManager::nextPileNoForStation(int stationId)
 {
     QSqlQuery query(m_db);
     query.prepare(
-        "SELECT pile_no FROM pile WHERE station_id = :sid ORDER BY pile_no DESC LIMIT 1");
+        "SELECT MAX(CAST(substr(pile_no, instr(pile_no, '-') + 1) AS INTEGER)) "
+        "FROM pile WHERE station_id = :sid AND instr(pile_no, '-') > 0");
     query.bindValue(":sid", stationId);
 
     int nextIdx = 1;
-    if (query.exec() && query.next()) {
-        const QString lastNo = query.value(0).toString();
-        const int dashPos = lastNo.lastIndexOf('-');
-        if (dashPos >= 0) {
-            nextIdx = lastNo.mid(dashPos + 1).toInt() + 1;
-        }
+    if (query.exec() && query.next() && !query.value(0).isNull()) {
+        nextIdx = query.value(0).toInt() + 1;
     }
 
     return QString("SZ%1-%2")
@@ -791,7 +839,8 @@ bool DbManager::pileHasOpenOrders(const QString &pileNo)
         "WHERE p.pile_no = :no AND o.status IN ('预约', '充电中', '待支付')");
     query.bindValue(":no", pileNo);
     if (!query.exec() || !query.next()) {
-        return false;
+        qWarning() << "pileHasOpenOrders query failed:" << query.lastError().text();
+        return true;
     }
     return query.value(0).toInt() > 0;
 }
@@ -805,7 +854,8 @@ bool DbManager::pileHasActiveOrders(const QString &pileNo)
         "WHERE p.pile_no = :no AND o.status IN ('预约', '充电中')");
     query.bindValue(":no", pileNo);
     if (!query.exec() || !query.next()) {
-        return false;
+        qWarning() << "pileHasActiveOrders query failed:" << query.lastError().text();
+        return true;
     }
     return query.value(0).toInt() > 0;
 }
@@ -819,7 +869,8 @@ bool DbManager::pileHasAnyOrders(const QString &pileNo)
         "WHERE p.pile_no = :no");
     query.bindValue(":no", pileNo);
     if (!query.exec() || !query.next()) {
-        return false;
+        qWarning() << "pileHasAnyOrders query failed:" << query.lastError().text();
+        return true;
     }
     return query.value(0).toInt() > 0;
 }
@@ -869,7 +920,9 @@ std::optional<QJsonObject> DbManager::findOrderByNo(const QString &orderNo)
     query.prepare(
         "SELECT o.id, o.order_no, o.user_id, o.station_id, o.pile_id, o.status, "
         "o.reserve_at, o.start_at, o.end_at, o.kwh, o.amount, "
-        "s.name AS station_name, p.pile_no, p.power_kw, s.price, u.phone "
+        "s.name AS station_name, p.pile_no, "
+        "COALESCE(o.bill_power_kw, p.power_kw) AS power_kw, "
+        "COALESCE(o.bill_price, s.price) AS price, u.phone "
         "FROM charge_order o "
         "JOIN station s ON o.station_id = s.id "
         "JOIN pile p ON o.pile_id = p.id "
@@ -1136,7 +1189,11 @@ bool DbManager::startCharge(const QString &orderNo, int pileId, const QString &s
     return runInTransaction([&]() {
         QSqlQuery orderQuery(m_db);
         orderQuery.prepare(
-            "UPDATE charge_order SET status = :status, start_at = :start_at "
+            "UPDATE charge_order SET status = :status, start_at = :start_at, "
+            "bill_price = (SELECT s.price FROM station s "
+            "  JOIN charge_order o ON o.station_id = s.id WHERE o.order_no = :no), "
+            "bill_power_kw = (SELECT p.power_kw FROM pile p "
+            "  JOIN charge_order o ON o.pile_id = p.id WHERE o.order_no = :no) "
             "WHERE order_no = :no AND status = :expected");
         orderQuery.bindValue(":status", QStringLiteral("充电中"));
         orderQuery.bindValue(":start_at", startAt);
@@ -1146,7 +1203,7 @@ bool DbManager::startCharge(const QString &orderNo, int pileId, const QString &s
             qWarning() << "startCharge update order failed:" << orderQuery.lastError().text();
             return false;
         }
-        return updatePileStatus(pileId, QStringLiteral("在用"));
+        return updatePileStatus(pileId, QStringLiteral("在用"), QStringLiteral("预约"));
     });
 }
 
@@ -1213,11 +1270,12 @@ QJsonObject DbManager::fetchStatsOverview(int days)
 {
     QJsonObject result;
 
-    // 今日营收和订单数
+    // 今日营收和订单数（按完成日 end_at 归因，无 end_at 时回退 created_at）
     QSqlQuery todayQuery(m_db);
     todayQuery.prepare(
         "SELECT COALESCE(SUM(amount),0) AS revenue, COUNT(*) AS orders "
-        "FROM charge_order WHERE status = '已完成' AND date(created_at) = date('now','localtime')");
+        "FROM charge_order WHERE status = '已完成' "
+        "AND date(COALESCE(NULLIF(end_at, ''), created_at)) = date('now','localtime')");
     if (todayQuery.exec() && todayQuery.next()) {
         result["today_revenue"] = todayQuery.value("revenue").toDouble();
         result["today_orders"] = todayQuery.value("orders").toInt();
@@ -1230,7 +1288,9 @@ QJsonObject DbManager::fetchStatsOverview(int days)
     QSqlQuery monthQuery(m_db);
     monthQuery.prepare(
         "SELECT COALESCE(SUM(amount),0) FROM charge_order "
-        "WHERE status = '已完成' AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now','localtime')");
+        "WHERE status = '已完成' "
+        "AND strftime('%Y-%m', COALESCE(NULLIF(end_at, ''), created_at)) "
+        "= strftime('%Y-%m', 'now','localtime')");
     if (monthQuery.exec() && monthQuery.next()) {
         result["month_revenue"] = monthQuery.value(0).toDouble();
     } else {
@@ -1260,10 +1320,11 @@ QJsonObject DbManager::fetchStatsOverview(int days)
     QHash<QString, double> revenueByDate;
     QSqlQuery trendQuery(m_db);
     trendQuery.prepare(
-        "SELECT date(created_at) AS d, COALESCE(SUM(amount),0) AS revenue "
+        "SELECT date(COALESCE(NULLIF(end_at, ''), created_at)) AS d, "
+        "COALESCE(SUM(amount),0) AS revenue "
         "FROM charge_order WHERE status = '已完成' "
-        "AND date(created_at) >= date('now','localtime', :offset) "
-        "GROUP BY date(created_at) ORDER BY d");
+        "AND date(COALESCE(NULLIF(end_at, ''), created_at)) >= date('now','localtime', :offset) "
+        "GROUP BY d ORDER BY d");
     trendQuery.bindValue(":offset", QString("-%1 days").arg(span - 1));
     if (trendQuery.exec()) {
         while (trendQuery.next()) {

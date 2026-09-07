@@ -65,15 +65,20 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
 
     // ========= 营收趋势页面 index=5 =========
     connect(ui->btnChart,&QPushButton::clicked,this,[=](){
+        if (m_refreshBusy) {
+            return;
+        }
         resetAllBtnSelect();
         ui->btnChart->setProperty("selected", true);
         ui->btnChart->setStyleSheet(ui->btnChart->styleSheet());
         ui->stackedWidget->setCurrentIndex(5);
         m_currentDays =7;
         ui->btnShift->setText("查看近30日");
+        m_refreshBusy = true;
         QJsonObject param;
         param["days"] = m_currentDays;
         QJsonObject resp = m_api->call("stats.overview", param);
+        m_refreshBusy = false;
         qDebug() << "[stats.overview] resp:" << resp;
         if(resp["ok"].toBool())
         {
@@ -90,9 +95,6 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     });
 
     // ========= 总览页面按钮 =========
-    connect(ui->btnRefresh, &QPushButton::clicked, this, [=](){
-        reloadOverviewStat();
-    });
 
     // ========= 初始化图表控件 =========
     m_chart = new QCustomPlot();
@@ -205,7 +207,7 @@ QPushButton:hover{
         "功率(kW)",
         "状态",
         "累计充电次数",
-        "累计电量",
+        "充电时长(分)",
         "操作"
     };
     ui->tableWidgetPile->setHorizontalHeaderLabels(pileHeaders);
@@ -221,10 +223,7 @@ QPushButton:hover{
     ui->comboPileStatus->addItem("在用");
     ui->comboPileStatus->addItem("故障");
 
-    // 查询按钮（只保留一份connect，修复重复绑定）
-    connect(ui->btnPileQuery,&QPushButton::clicked,this,[=](){
-        reloadPileList();
-    });
+    // 查询按钮使用 on_btnPileQuery_clicked 自动槽
 
     //=====右上角电桩页面其他按钮=====
     connect(ui->btnGoPileStatus,&QPushButton::clicked,this,[=](){
@@ -353,7 +352,8 @@ MainWindow::~MainWindow()
 
 void MainWindow::resetAllBtnSelect()
 {
-    auto btns = {ui->btnOverview, ui->btnPile, ui->btnStation, ui->btnUser, ui->btnOrder, ui->btnLog};
+    auto btns = {ui->btnOverview, ui->btnPile, ui->btnStation, ui->btnUser,
+                 ui->btnOrder, ui->btnLog, ui->btnChart};
     for(auto btn : btns)
     {
         btn->setProperty("selected", false);
@@ -454,7 +454,7 @@ void MainWindow::onUserFreezeClick(int userId, bool wantFreeze)
         QMessageBox::warning(this,QStringLiteral("操作失败"), errMsg);
         return;
     }
-    reloadUserList("");
+    reloadUserList(ui->editSearchPhone->text().trimmed());
 }
 
 void MainWindow::addUserRow(const QJsonObject &userObj)
@@ -516,13 +516,6 @@ void MainWindow::loadStationCombo()
 {
     ui->comboStation->clear();
     ui->comboStation->addItem("全部电站");
-    // 关键修复：清空状态下拉，防止重复叠加选项！！
-    ui->comboPileStatus->clear();
-    ui->comboPileStatus->addItem("全部状态");
-    ui->comboPileStatus->addItem("闲置");
-    ui->comboPileStatus->addItem("预约");
-    ui->comboPileStatus->addItem("在用");
-    ui->comboPileStatus->addItem("故障");
 
     QJsonObject resp = m_api->call(QStringLiteral("station.admin.list"));
     qDebug()<<"station.admin.list resp:"<<resp;
@@ -570,14 +563,16 @@ void MainWindow::reloadPileList()
     qDebug()<<"【pile.list请求参数】"<<params;
     QJsonObject resp = m_api->call("pile.list", params);
     qDebug() << "pile.list 返回：" << resp;
-    if(resp["ok"].toBool())
-    {
-        QJsonArray items = resp["data"].toObject()["items"].toArray();
-        qDebug()<<"返回电桩数量："<<items.size();
-        for(auto item : items)
-        {
-            addPileRow(item.toObject());
-        }
+    if (!resp["ok"].toBool()) {
+        const QString errMsg = resp["error"].toObject()["message"].toString(
+            QStringLiteral("获取电桩列表失败"));
+        QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        return;
+    }
+    QJsonArray items = resp["data"].toObject()["items"].toArray();
+    qDebug()<<"返回电桩数量："<<items.size();
+    for (auto item : items) {
+        addPileRow(item.toObject());
     }
 }
 
@@ -590,7 +585,7 @@ void MainWindow::addPileRow(const QJsonObject &obj)
     ui->tableWidgetPile->setItem(row,0, new QTableWidgetItem(pileNo));
     ui->tableWidgetPile->setItem(row,1, new QTableWidgetItem(obj["station_name"].toString()));
     ui->tableWidgetPile->setItem(row,2, new QTableWidgetItem(obj["type"].toString()));
-    ui->tableWidgetPile->setItem(row,3, new QTableWidgetItem(QString::number(obj["power_kw"].toInt())));
+    ui->tableWidgetPile->setItem(row,3, new QTableWidgetItem(QString::number(obj["power_kw"].toDouble(), 'f', 1)));
     ui->tableWidgetPile->setItem(row,4, new QTableWidgetItem(obj["status"].toString()));
     ui->tableWidgetPile->setItem(row,5, new QTableWidgetItem(QString::number(obj["charge_count"].toInt())));
     ui->tableWidgetPile->setItem(row,6, new QTableWidgetItem(QString::number(obj["charge_minutes"].toInt())));
@@ -672,19 +667,40 @@ void MainWindow::batchPileRestart()
             pileNoSet.insert(item->text());
         }
     }
-    if(pileNoSet.isEmpty())
-    {
+    if (pileNoSet.isEmpty()) {
         QMessageBox::information(this,"提示","请先勾选要操作的电桩");
+        return;
+    }
+    const auto confirm = QMessageBox::question(
+        this, QStringLiteral("确认"),
+        QStringLiteral("确定远程重启选中的 %1 个电桩吗？").arg(pileNoSet.size()),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (confirm != QMessageBox::Yes) {
         return;
     }
     QStringList pileNos(pileNoSet.begin(), pileNoSet.end());
     qDebug()<<"选中电桩编号："<<pileNos;
-    for(const QString& no : pileNos)
-    {
-        m_api->call("pile.restart", QJsonObject{{"pile_no", no}});
+    int okCount = 0;
+    int failCount = 0;
+    QString lastErr;
+    for (const QString &no : pileNos) {
+        const QJsonObject resp = m_api->call("pile.restart", QJsonObject{{"pile_no", no}});
+        if (resp["ok"].toBool()) {
+            ++okCount;
+        } else {
+            ++failCount;
+            lastErr = resp["error"].toObject()["message"].toString(QStringLiteral("重启失败"));
+        }
     }
-    QMessageBox::information(this,"提示","批量重启指令已下发");
     reloadPileList();
+    if (failCount == 0) {
+        QMessageBox::information(this, QStringLiteral("成功"),
+                                 QStringLiteral("批量重启指令已下发（%1 个）").arg(okCount));
+    } else {
+        QMessageBox::warning(this, QStringLiteral("部分失败"),
+                             QStringLiteral("成功 %1 个，失败 %2 个。最近错误：%3")
+                                 .arg(okCount).arg(failCount).arg(lastErr));
+    }
 }
 
 void MainWindow::batchDeletePile()
@@ -820,12 +836,13 @@ void MainWindow::drawRevenueChartFromJson(const QJsonArray &trendArr)
 
 void MainWindow::on_btnRefresh_clicked()
 {
-    if(m_refreshBusy)
-    {
-        QMessageBox::information(this,"提示","正在请求，请稍等");
+    if (m_refreshBusy) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("正在请求，请稍等"));
         return;
     }
+    m_refreshBusy = true;
     reloadOverviewStat();
+    m_refreshBusy = false;
 }
 
 // 返回总览
@@ -885,9 +902,16 @@ void MainWindow::onEditPileBtnClicked(const QString &pileNo)
     }
 
     // 列2=type, 列3=power_kw, 列4=status
-    QString oldType = ui->tableWidgetPile->item(row,2)->text();
-    double oldPower = ui->tableWidgetPile->item(row,3)->text().toDouble();
-    QString oldStatus = ui->tableWidgetPile->item(row,4)->text();
+    QTableWidgetItem *typeItem = ui->tableWidgetPile->item(row, 2);
+    QTableWidgetItem *powerItem = ui->tableWidgetPile->item(row, 3);
+    QTableWidgetItem *statusItem = ui->tableWidgetPile->item(row, 4);
+    if (!typeItem || !powerItem || !statusItem) {
+        QMessageBox::warning(this, QStringLiteral("错误"), QStringLiteral("电桩行数据不完整"));
+        return;
+    }
+    const QString oldType = typeItem->text();
+    const double oldPower = powerItem->text().toDouble();
+    const QString oldStatus = statusItem->text();
 
     PileEditDialog dlg(this);
     dlg.setData(pileNo, oldType, oldPower, oldStatus);
