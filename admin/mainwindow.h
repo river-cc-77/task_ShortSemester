@@ -5,6 +5,8 @@
 #include <QMainWindow>
 #include "qcustomplot.h"
 #include "pileeditdialog.h"
+#include "pilestatusdialog.h"
+#include "pileadddialog.h"
 class ApiClient;
 namespace Ui {
 class MainWindow;
@@ -31,6 +33,9 @@ private slots:
     void onPileRestart(const QString &pileNo);
     void batchPileRestart();
     void batchDeletePile();
+    QString getSingleSelectedPileNo() const;
+    void goToSelectedPileStatus();
+    void onAddPileClicked();
 
     // 电桩编辑弹窗槽函数
     void onEditPileBtnClicked(const QString& pileNo);

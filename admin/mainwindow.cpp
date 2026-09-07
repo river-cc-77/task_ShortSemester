@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLineEdit>
+#include <QSet>
 
 MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent)
     : QMainWindow(parent)
@@ -207,10 +208,10 @@ QPushButton:hover{
 
     //=====右上角电桩页面其他按钮=====
     connect(ui->btnGoPileStatus,&QPushButton::clicked,this,[=](){
-        qDebug()<<"点击：跳转到电桩状态";
+        goToSelectedPileStatus();
     });
     connect(ui->btnAddPile,&QPushButton::clicked,this,[=](){
-        qDebug()<<"点击：新增电桩";
+        onAddPileClicked();
     });
     connect(ui->btnRemoteReboot,&QPushButton::clicked,this,[=](){
         qDebug()<<"点击：远程重启(批量)";
@@ -404,8 +405,8 @@ void MainWindow::loadStationCombo()
     ui->comboPileStatus->addItem("在用");
     ui->comboPileStatus->addItem("故障");
 
-    QJsonObject resp = m_api->call("station.list", QJsonObject());
-    qDebug()<<"station.list resp:"<<resp;
+    QJsonObject resp = m_api->call(QStringLiteral("station.admin.list"));
+    qDebug()<<"station.admin.list resp:"<<resp;
     if(!resp["ok"].toBool())
     {
         qDebug()<<"获取电站列表失败:"<<resp["error"].toObject()["message"].toString();
@@ -416,7 +417,7 @@ void MainWindow::loadStationCombo()
     {
         QJsonObject o = v.toObject();
         QString name = o["name"].toString();
-        int sid = o["station_id"].toInt();
+        int sid = o["id"].toInt();
         ui->comboStation->addItem(name, sid);
     }
 }
@@ -767,5 +768,89 @@ int MainWindow::getRowByPileNo(const QString &pileNo)
         }
     }
     return -1;
+}
+
+QString MainWindow::getSingleSelectedPileNo() const
+{
+    QSet<QString> pileNoSet;
+    for (QTableWidgetItem *item : ui->tableWidgetPile->selectedItems()) {
+        if (item->column() == 0) {
+            pileNoSet.insert(item->text());
+        }
+    }
+    if (pileNoSet.size() != 1) {
+        return {};
+    }
+    return *pileNoSet.begin();
+}
+
+void MainWindow::goToSelectedPileStatus()
+{
+    const QString pileNo = getSingleSelectedPileNo();
+    if (pileNo.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("提示"),
+                                 QStringLiteral("请先在表格中选中一条电桩记录（只能选一条）"));
+        return;
+    }
+
+    ui->lineEditPileId->setText(pileNo);
+    ui->comboStation->setCurrentIndex(0);
+    ui->comboPileStatus->setCurrentText(QStringLiteral("全部状态"));
+    reloadPileList();
+
+    const int row = getRowByPileNo(pileNo);
+    if (row >= 0) {
+        ui->tableWidgetPile->selectRow(row);
+    }
+
+    QJsonObject resp = m_api->call(QStringLiteral("pile.detail"), QJsonObject{{"pile_no", pileNo}});
+    if (!resp.value("ok").toBool()) {
+        const QString errMsg = resp.value("error").toObject().value("message").toString(
+            QStringLiteral("获取电桩详情失败"));
+        QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        return;
+    }
+
+    PileStatusDialog dlg(this);
+    dlg.setDetail(resp.value("data").toObject());
+    dlg.exec();
+}
+
+void MainWindow::onAddPileClicked()
+{
+    PileAddDialog dlg(this);
+    if (!dlg.loadStations(m_api)) {
+        return;
+    }
+
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    QJsonObject resp = m_api->call(QStringLiteral("pile.create"), dlg.getCreateParams());
+    if (resp.value("ok").toBool()) {
+        const QJsonObject data = resp.value("data").toObject();
+        const QString pileNo = data.value("pile_no").toString();
+        const int stationId = data.value("station_id").toInt();
+        QMessageBox::information(this, QStringLiteral("成功"),
+                                 QStringLiteral("已新增电桩：%1").arg(pileNo));
+        ui->lineEditPileId->clear();
+        ui->comboPileStatus->setCurrentText(QStringLiteral("全部状态"));
+        for (int i = 0; i < ui->comboStation->count(); ++i) {
+            if (ui->comboStation->itemData(i).toInt() == stationId) {
+                ui->comboStation->setCurrentIndex(i);
+                break;
+            }
+        }
+        reloadPileList();
+        const int row = getRowByPileNo(pileNo);
+        if (row >= 0) {
+            ui->tableWidgetPile->selectRow(row);
+        }
+    } else {
+        const QString errMsg = resp.value("error").toObject().value("message").toString(
+            QStringLiteral("新增失败"));
+        QMessageBox::warning(this, QStringLiteral("失败"), errMsg);
+    }
 }
 

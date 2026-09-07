@@ -179,6 +179,12 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
         // 协议 5.2 P2：删除电桩
         return AdminHandler::pileDelete(id, token, data);
     }
+    if (cmd == "pile.detail") {
+        return AdminHandler::pileDetail(id, token, data);
+    }
+    if (cmd == "pile.create") {
+        return AdminHandler::pileCreate(id, token, data);
+    }
 
     // ===== 统计 =====
     if (cmd == "stats.overview") {

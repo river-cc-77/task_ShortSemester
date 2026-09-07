@@ -732,6 +732,116 @@ def test_admin_pile_page_api(host: str, port: int, token: str, admin_token: str)
         raise RuntimeError("pile update/restart/restore should add operation_log rows")
 
 
+def test_admin_pile_detail_and_create(host: str, port: int, token: str, admin_token: str) -> None:
+    print("\n========== I. Admin 电桩 detail / create ==========")
+    db = db_path()
+
+    idle_detail = run_test(
+        host,
+        port,
+        {
+            "id": "I1",
+            "cmd": "pile.detail",
+            "token": admin_token,
+            "data": {"pile_no": "SZ005-01"},
+        },
+        "pile.detail idle pile",
+    )
+    data = idle_detail["data"]
+    for field in ("pile_no", "station_name", "type", "power_kw", "status", "current_order"):
+        if field not in data:
+            raise RuntimeError(f"pile.detail missing {field}: {data}")
+    if data["current_order"] is not None:
+        raise RuntimeError(f"idle pile should have null current_order, got {data['current_order']}")
+
+    pile_no = find_idle_pile(host, port, token)
+    reserve = run_test(
+        host,
+        port,
+        {"id": "I2a", "cmd": "charge.reserve", "token": token, "data": {"pile_no": pile_no}},
+        f"reserve {pile_no} for pile.detail",
+    )
+    order_no = reserve["data"]["order_no"]
+
+    active_detail = run_test(
+        host,
+        port,
+        {
+            "id": "I2",
+            "cmd": "pile.detail",
+            "token": admin_token,
+            "data": {"pile_no": pile_no},
+        },
+        "pile.detail active pile",
+    )
+    current_order = active_detail["data"]["current_order"]
+    if not current_order:
+        raise RuntimeError("reserved pile should expose current_order in pile.detail")
+    if current_order.get("order_no") != order_no:
+        raise RuntimeError(f"current_order mismatch: {current_order}")
+    if current_order.get("status") != "预约":
+        raise RuntimeError(f"expected 预约 order, got {current_order.get('status')}")
+
+    finish_order(host, port, token, order_no, admin_token)
+
+    log_cnt_before = db_query_scalar(db, "SELECT COUNT(*) FROM operation_log")
+    created = run_test(
+        host,
+        port,
+        {
+            "id": "I3",
+            "cmd": "pile.create",
+            "token": admin_token,
+            "data": {"station_id": 5, "type": "慢充", "power_kw": 7.0},
+        },
+        "pile.create auto pile_no",
+    )
+    new_pile_no = created["data"]["pile_no"]
+    if not new_pile_no.startswith("SZ005-"):
+        raise RuntimeError(f"unexpected auto pile_no: {new_pile_no}")
+
+    db_status = db_query_scalar(
+        db, "SELECT status FROM pile WHERE pile_no = ?", (new_pile_no,)
+    )
+    if db_status != "闲置":
+        raise RuntimeError(f"new pile should be 闲置, got {db_status}")
+
+    action = db_query_scalar(
+        db, "SELECT action FROM operation_log ORDER BY id DESC LIMIT 1"
+    )
+    if action != "新增电桩":
+        raise RuntimeError(f"pile.create log expected 新增电桩, got {action}")
+
+    run_test_error(
+        host,
+        port,
+        {
+            "id": "I4",
+            "cmd": "pile.create",
+            "token": admin_token,
+            "data": {
+                "station_id": 5,
+                "type": "慢充",
+                "power_kw": 7.0,
+                "pile_no": new_pile_no,
+            },
+        },
+        "pile.create duplicate pile_no",
+        "INVALID_PARAM",
+    )
+
+    run_test(
+        host,
+        port,
+        {"id": "I5", "cmd": "pile.delete", "token": admin_token, "data": {"pile_no": new_pile_no}},
+        f"cleanup pile.delete {new_pile_no}",
+    )
+
+    log_cnt_after = db_query_scalar(db, "SELECT COUNT(*) FROM operation_log")
+    if log_cnt_after < log_cnt_before + 2:
+        raise RuntimeError("pile.create/delete should add operation_log rows")
+
+
 def main() -> int:
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 9000
@@ -764,6 +874,7 @@ def main() -> int:
     test_admin_user_list_api(host, port, admin_token)
     test_admin_freeze_roundtrip(host, port, admin_token)
     test_admin_pile_page_api(host, port, token, admin_token)
+    test_admin_pile_detail_and_create(host, port, token, admin_token)
     test_tx_reserve_consistency(host, port, token, admin_token)
     test_tx_settle_consistency(host, port, token, admin_token)
     test_tx_settle_insufficient_no_partial(host, port, admin_token)

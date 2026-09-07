@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
@@ -579,6 +580,115 @@ bool DbManager::deletePile(const QString &pileNo)
     query.prepare("DELETE FROM pile WHERE pile_no = :no");
     query.bindValue(":no", pileNo);
     return query.exec();
+}
+
+bool DbManager::pileNoExists(const QString &pileNo)
+{
+    return findPileByNo(pileNo).has_value();
+}
+
+QString DbManager::nextPileNoForStation(int stationId)
+{
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT pile_no FROM pile WHERE station_id = :sid ORDER BY pile_no DESC LIMIT 1");
+    query.bindValue(":sid", stationId);
+
+    int nextIdx = 1;
+    if (query.exec() && query.next()) {
+        const QString lastNo = query.value(0).toString();
+        const int dashPos = lastNo.lastIndexOf('-');
+        if (dashPos >= 0) {
+            nextIdx = lastNo.mid(dashPos + 1).toInt() + 1;
+        }
+    }
+
+    return QString("SZ%1-%2")
+        .arg(stationId, 3, 10, QChar('0'))
+        .arg(nextIdx, 2, 10, QChar('0'));
+}
+
+std::optional<QString> DbManager::createPile(int stationId, const QString &type,
+                                              double powerKw, const QString &pileNoIn)
+{
+    QSqlQuery stationQuery(m_db);
+    stationQuery.prepare("SELECT COUNT(*) FROM station WHERE id = :id");
+    stationQuery.bindValue(":id", stationId);
+    if (!stationQuery.exec() || !stationQuery.next()
+            || stationQuery.value(0).toInt() <= 0) {
+        return std::nullopt;
+    }
+
+    QString pileNo = pileNoIn.trimmed();
+    if (pileNo.isEmpty()) {
+        pileNo = nextPileNoForStation(stationId);
+        for (int attempt = 0; attempt < 100 && pileNoExists(pileNo); ++attempt) {
+            const int dashPos = pileNo.lastIndexOf('-');
+            if (dashPos < 0) {
+                break;
+            }
+            const int idx = pileNo.mid(dashPos + 1).toInt() + 1;
+            pileNo = QString("SZ%1-%2")
+                         .arg(stationId, 3, 10, QChar('0'))
+                         .arg(idx, 2, 10, QChar('0'));
+        }
+    }
+    if (pileNoExists(pileNo)) {
+        return std::nullopt;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(
+        "INSERT INTO pile (pile_no, station_id, type, power_kw, status) "
+        "VALUES (:no, :sid, :type, :power, '闲置')");
+    query.bindValue(":no", pileNo);
+    query.bindValue(":sid", stationId);
+    query.bindValue(":type", type);
+    query.bindValue(":power", powerKw);
+    if (!query.exec()) {
+        qWarning() << "createPile failed:" << query.lastError().text();
+        return std::nullopt;
+    }
+    return pileNo;
+}
+
+std::optional<QJsonObject> DbManager::fetchPileDetail(const QString &pileNo)
+{
+    const auto pileOpt = findPileByNo(pileNo);
+    if (!pileOpt.has_value()) {
+        return std::nullopt;
+    }
+
+    QJsonObject detail = pileOpt.value();
+    detail.remove("id");
+    detail.remove("price");
+
+    QSqlQuery orderQuery(m_db);
+    orderQuery.prepare(
+        "SELECT o.order_no, o.status, u.phone, o.kwh, o.amount, "
+        "o.start_at, o.reserve_at "
+        "FROM charge_order o "
+        "JOIN pile p ON o.pile_id = p.id "
+        "JOIN user u ON o.user_id = u.id "
+        "WHERE p.pile_no = :no AND o.status IN ('预约', '充电中', '待支付') "
+        "ORDER BY o.id DESC LIMIT 1");
+    orderQuery.bindValue(":no", pileNo);
+
+    if (orderQuery.exec() && orderQuery.next()) {
+        QJsonObject currentOrder;
+        currentOrder["order_no"] = orderQuery.value("order_no").toString();
+        currentOrder["status"] = orderQuery.value("status").toString();
+        currentOrder["phone"] = orderQuery.value("phone").toString();
+        currentOrder["kwh"] = orderQuery.value("kwh").toDouble();
+        currentOrder["amount"] = orderQuery.value("amount").toDouble();
+        currentOrder["start_at"] = orderQuery.value("start_at").toString();
+        currentOrder["reserve_at"] = orderQuery.value("reserve_at").toString();
+        detail["current_order"] = currentOrder;
+    } else {
+        detail["current_order"] = QJsonValue::Null;
+    }
+
+    return detail;
 }
 
 bool DbManager::pileHasOpenOrders(const QString &pileNo)

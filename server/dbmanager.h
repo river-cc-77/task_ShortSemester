@@ -46,6 +46,11 @@ public:
     bool updatePile(const QString &pileNo, const QString &type,
                     double powerKw, const QString &status);
     bool deletePile(const QString &pileNo);
+    bool pileNoExists(const QString &pileNo);
+    QString nextPileNoForStation(int stationId);
+    std::optional<QString> createPile(int stationId, const QString &type,
+                                      double powerKw, const QString &pileNo = QString());
+    std::optional<QJsonObject> fetchPileDetail(const QString &pileNo);
     bool pileHasOpenOrders(const QString &pileNo);
     bool pileHasActiveOrders(const QString &pileNo);
 

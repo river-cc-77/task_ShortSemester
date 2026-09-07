@@ -124,6 +124,8 @@
 | `pile.restart` | 管理端 | P1 | 远程重启 |
 | `pile.update` | 管理端 | P2 | 修改电桩 |
 | `pile.delete` | 管理端 | P2 | 删除电桩 |
+| `pile.detail` | 管理端 | P2 | 电桩详情（含当前订单） |
+| `pile.create` | 管理端 | P2 | 新增电桩 |
 | `station.admin.list` | 管理端 | P1 | 电站管理列表 |
 | `station.create` | 管理端 | P1 | 新增电站 |
 | `user.admin.list` | 管理端 | P1 | 用户列表 |
@@ -583,7 +585,70 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.16 `station.admin.list` / `station.create`
+### 4.16 `pile.detail`
+
+**请求 data：** `{ "pile_no": "SZ001-03" }`
+
+**响应 data：**
+
+```json
+{
+  "pile_no": "SZ001-03",
+  "station_id": 1,
+  "station_name": "深圳市民中心充电站",
+  "type": "快充",
+  "power_kw": 120.0,
+  "status": "在用",
+  "charge_count": 412,
+  "charge_minutes": 14800,
+  "current_order": {
+    "order_no": "CD20260828002",
+    "status": "充电中",
+    "phone": "13800138001",
+    "kwh": 12.5,
+    "amount": 15.0,
+    "reserve_at": "2026-08-28 10:00:00",
+    "start_at": "2026-08-28 10:05:00"
+  }
+}
+```
+
+无未完成订单时 `current_order` 为 `null`。
+
+---
+
+### 4.17 `pile.create`
+
+**请求 data：**
+
+```json
+{
+  "station_id": 5,
+  "type": "快充",
+  "power_kw": 120.0,
+  "pile_no": ""
+}
+```
+
+`pile_no` 可选；留空则服务端按 `SZ{站ID}-{序号}` 自动生成。
+
+**响应 data：**
+
+```json
+{
+  "pile_no": "SZ005-05",
+  "station_id": 5,
+  "type": "快充",
+  "power_kw": 120.0,
+  "status": "闲置"
+}
+```
+
+写 `operation_log`（action =「新增电桩」）。
+
+---
+
+### 4.18 `station.admin.list` / `station.create`
 
 **list 响应 items[]：** id, name, address, lat, lng, price, total_piles, idle_piles, online_rate, created_at
 
@@ -605,7 +670,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.17 `user.admin.list` / `user.freeze`
+### 4.19 `user.admin.list` / `user.freeze`
 
 **list 请求 data：** `{ "phone_keyword": "138" }`
 
@@ -616,7 +681,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.18 `order.admin.settle`
+### 4.20 `order.admin.settle`
 
 管理员代用户结算待支付订单。逻辑同 `charge.settle`，须写 `operation_log`。
 
@@ -632,6 +697,8 @@ amount = round(kwh × station.price, 2)
 
 ### 5.2 电桩 CRUD
 
+- `pile.create` — 新增电桩（station_id / type / power_kw，pile_no 可选自动生成）
+- `pile.detail` — 查询电桩详情及当前未完成订单
 - `pile.update` — 修改 type / power_kw / status
 - `pile.delete` — 删除空闲电桩（在用/预约中禁止删除）
 

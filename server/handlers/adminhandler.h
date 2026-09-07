@@ -21,6 +21,12 @@ public:
 
     // 删除电桩（协议 5.2 P2，使用中禁止删除）
     static QJsonObject pileDelete(const QString &id, const QString &token, const QJsonObject &data);
+
+    // 电桩详情（含当前未完成订单）
+    static QJsonObject pileDetail(const QString &id, const QString &token, const QJsonObject &data);
+
+    // 新增电桩
+    static QJsonObject pileCreate(const QString &id, const QString &token, const QJsonObject &data);
 };
 
 #endif // ADMINHANDLER_H

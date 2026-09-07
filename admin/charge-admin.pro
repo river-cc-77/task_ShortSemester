@@ -8,13 +8,19 @@ SOURCES += \
     loginwindow.cpp \
     mainwindow.cpp \
     pileeditdialog.cpp \
+    pilestatusdialog.cpp \
+    pileadddialog.cpp \
     qcustomplot.cpp
 HEADERS += \
     apiclient.h \
     loginwindow.h \
     mainwindow.h \
     pileeditdialog.h \
+    pilestatusdialog.h \
+    pileadddialog.h \
     qcustomplot.h
 FORMS += \
     mainwindow.ui \
-    pileeditdialog.ui
+    pileeditdialog.ui \
+    pilestatusdialog.ui \
+    pileadddialog.ui

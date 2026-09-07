@@ -226,3 +226,75 @@ QJsonObject AdminHandler::pileDelete(const QString &id, const QString &token, co
     responseData["pile_no"] = pileNo;
     return Protocol::makeSuccess(id, responseData);
 }
+
+// ============================================================
+// pile.detail — 电桩详情（含当前未完成订单）
+// ============================================================
+QJsonObject AdminHandler::pileDetail(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    const QJsonObject auth = authAdmin(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    const QString pileNo = data.value("pile_no").toString().trimmed();
+    if (pileNo.isEmpty()) {
+        return Protocol::makeError(id, "INVALID_PARAM", "缺少 pile_no");
+    }
+
+    const auto detailOpt = DbManager::instance().fetchPileDetail(pileNo);
+    if (!detailOpt.has_value()) {
+        return Protocol::makeError(id, "NOT_FOUND", "电桩不存在");
+    }
+
+    return Protocol::makeSuccess(id, detailOpt.value());
+}
+
+// ============================================================
+// pile.create — 新增电桩
+// ============================================================
+QJsonObject AdminHandler::pileCreate(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    const QJsonObject auth = authAdmin(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    const int stationId = data.value("station_id").toInt(0);
+    const QString type = data.value("type").toString().trimmed();
+    const double powerKw = data.value("power_kw").toDouble(-1);
+    const QString pileNo = data.value("pile_no").toString().trimmed();
+
+    if (stationId <= 0) {
+        return Protocol::makeError(id, "INVALID_PARAM", "缺少或无效的 station_id");
+    }
+    if (type != QStringLiteral("快充") && type != QStringLiteral("慢充")) {
+        return Protocol::makeError(id, "INVALID_PARAM", "类型只能为快充或慢充");
+    }
+    if (powerKw <= 0) {
+        return Protocol::makeError(id, "INVALID_PARAM", "功率必须大于 0");
+    }
+    if (!pileNo.isEmpty() && DbManager::instance().pileNoExists(pileNo)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "电桩编号已存在");
+    }
+
+    const auto createdOpt = DbManager::instance().createPile(stationId, type, powerKw, pileNo);
+    if (!createdOpt.has_value()) {
+        if (!pileNo.isEmpty()) {
+            return Protocol::makeError(id, "INVALID_PARAM", "电桩编号已存在或电站无效");
+        }
+        return Protocol::makeError(id, "DB_ERROR", "新增电桩失败");
+    }
+
+    const QString createdNo = createdOpt.value();
+    DbManager::instance().writeOperationLog(
+        session.adminId, QStringLiteral("新增电桩"),
+        QStringLiteral("pile"), createdNo,
+        QString("station_id=%1 type=%2 power=%3").arg(stationId).arg(type).arg(powerKw));
+
+    QJsonObject responseData;
+    responseData["pile_no"] = createdNo;
+    responseData["station_id"] = stationId;
+    responseData["type"] = type;
+    responseData["power_kw"] = powerKw;
+    responseData["status"] = QStringLiteral("闲置");
+    return Protocol::makeSuccess(id, responseData);
+}
