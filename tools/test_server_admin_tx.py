@@ -553,6 +553,178 @@ def test_tx_admin_settle_operation_log(host: str, port: int, token: str, admin_t
         raise RuntimeError(f"expected operation_log action 代结算, got {action}")
 
 
+def test_admin_pile_page_api(host: str, port: int, token: str, admin_token: str) -> None:
+    print("\n========== H. Admin 电桩页 API（list / update / restart） ==========")
+    db = db_path()
+
+    all_piles = run_test(
+        host,
+        port,
+        {"id": "H1", "cmd": "pile.list", "token": admin_token, "data": {}},
+        "pile.list all",
+    )
+    items = all_piles["data"]["items"]
+    if not items:
+        raise RuntimeError("pile.list returned empty on seed db")
+
+    required_fields = (
+        "pile_no",
+        "station_name",
+        "type",
+        "power_kw",
+        "status",
+        "charge_count",
+        "charge_minutes",
+    )
+    for row in items:
+        for field in required_fields:
+            if field not in row:
+                raise RuntimeError(f"pile.list row missing {field}: {row}")
+
+    idle_only = run_test(
+        host,
+        port,
+        {
+            "id": "H2",
+            "cmd": "pile.list",
+            "token": admin_token,
+            "data": {"status": "闲置"},
+        },
+        "pile.list status=闲置",
+    )
+    for row in idle_only["data"]["items"]:
+        if row.get("status") != "闲置":
+            raise RuntimeError(f"status filter leak: {row}")
+
+    by_keyword = run_test(
+        host,
+        port,
+        {
+            "id": "H3",
+            "cmd": "pile.list",
+            "token": admin_token,
+            "data": {"keyword": "SZ005"},
+        },
+        "pile.list keyword=SZ005",
+    )
+    for row in by_keyword["data"]["items"]:
+        if "SZ005" not in row.get("pile_no", ""):
+            raise RuntimeError(f"keyword filter leak: {row}")
+
+    by_station = run_test(
+        host,
+        port,
+        {
+            "id": "H4",
+            "cmd": "pile.list",
+            "token": admin_token,
+            "data": {"station_id": 1},
+        },
+        "pile.list station_id=1",
+    )
+    if not by_station["data"]["items"]:
+        raise RuntimeError("station_id=1 should return piles")
+
+    pile_no = "SZ005-05"
+    orig_power = db_query_scalar(db, "SELECT power_kw FROM pile WHERE pile_no = ?", (pile_no,))
+    log_cnt_before = db_query_scalar(db, "SELECT COUNT(*) FROM operation_log")
+
+    run_test(
+        host,
+        port,
+        {
+            "id": "H5",
+            "cmd": "pile.update",
+            "token": admin_token,
+            "data": {"pile_no": pile_no, "power_kw": 9.5},
+        },
+        f"pile.update {pile_no} power",
+    )
+    power_after = db_query_scalar(db, "SELECT power_kw FROM pile WHERE pile_no = ?", (pile_no,))
+    if abs(power_after - 9.5) > 0.01:
+        raise RuntimeError(f"pile.update not persisted: expected 9.5 db={power_after}")
+
+    action = db_query_scalar(
+        db, "SELECT action FROM operation_log ORDER BY id DESC LIMIT 1"
+    )
+    if action != "修改电桩":
+        raise RuntimeError(f"pile.update should write operation_log 修改电桩, got {action}")
+
+    run_test(
+        host,
+        port,
+        {
+            "id": "H6",
+            "cmd": "pile.restart",
+            "token": admin_token,
+            "data": {"pile_no": pile_no},
+        },
+        f"pile.restart idle {pile_no}",
+    )
+    status_after_restart = db_query_scalar(
+        db, "SELECT status FROM pile WHERE pile_no = ?", (pile_no,)
+    )
+    if status_after_restart != "闲置":
+        raise RuntimeError(f"after restart pile should stay 闲置, got {status_after_restart}")
+
+    restart_action = db_query_scalar(
+        db, "SELECT action FROM operation_log ORDER BY id DESC LIMIT 1"
+    )
+    if restart_action != "远程重启电桩":
+        raise RuntimeError(f"pile.restart log expected 远程重启电桩, got {restart_action}")
+
+    # restore power for repeat runs
+    run_test(
+        host,
+        port,
+        {
+            "id": "H6r",
+            "cmd": "pile.update",
+            "token": admin_token,
+            "data": {"pile_no": pile_no, "power_kw": orig_power},
+        },
+        f"pile.update restore power {pile_no}",
+    )
+
+    busy_pile = find_idle_pile(host, port, token)
+    reserve = run_test(
+        host,
+        port,
+        {"id": "H7a", "cmd": "charge.reserve", "token": token, "data": {"pile_no": busy_pile}},
+        f"reserve {busy_pile} for restart block",
+    )
+    order_no = reserve["data"]["order_no"]
+    run_test_error(
+        host,
+        port,
+        {
+            "id": "H7b",
+            "cmd": "pile.restart",
+            "token": admin_token,
+            "data": {"pile_no": busy_pile},
+        },
+        "pile.restart on 预约 pile",
+        "INVALID_PARAM",
+    )
+    run_test_error(
+        host,
+        port,
+        {
+            "id": "H7c",
+            "cmd": "pile.update",
+            "token": admin_token,
+            "data": {"pile_no": busy_pile, "status": "故障"},
+        },
+        "pile.update status while active order",
+        "INVALID_PARAM",
+    )
+    finish_order(host, port, token, order_no, admin_token)
+
+    log_cnt_after = db_query_scalar(db, "SELECT COUNT(*) FROM operation_log")
+    if log_cnt_after < log_cnt_before + 3:
+        raise RuntimeError("pile update/restart/restore should add operation_log rows")
+
+
 def main() -> int:
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 9000
@@ -584,6 +756,7 @@ def main() -> int:
     test_admin_dashboard_api(host, port, admin_token)
     test_admin_user_list_api(host, port, admin_token)
     test_admin_freeze_roundtrip(host, port, admin_token)
+    test_admin_pile_page_api(host, port, token, admin_token)
     test_tx_reserve_consistency(host, port, token, admin_token)
     test_tx_settle_consistency(host, port, token, admin_token)
     test_tx_settle_insufficient_no_partial(host, port, admin_token)

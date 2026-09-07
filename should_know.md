@@ -149,6 +149,7 @@ qmake6 charge-admin.pro && make -j4
 | 事务 settle | 扣款、wallet_log、订单「已完成」、桩回「闲置」一致 |
 | 余额不足 | 结算失败时不部分扣款、订单仍「待支付」 |
 | 代结算日志 | `order.admin.settle` 写 `operation_log` |
+| Admin 电桩页 | `pile.list` 筛选、`pile.update` 落库、`pile.restart`、使用中拦截 + `operation_log` |
 
 运行：`python3 tools/test_server_admin_tx.py`（建议 fresh db + 重编 server 后跑）
 
@@ -167,9 +168,9 @@ qmake6 charge-admin.pro && make -j4
 
 | 功能 | 预期测试 |
 |------|----------|
-| `station.create` 站名重复 | 返回「站名已存在」 |
+| `operation.log.list` | Admin 操作日志页列表 |
 | `forecast.list` / `event.push` | 第二阶段 ML 与推送 |
-| admin 电桩/电站/日志页 UI | 接 pile.list、station.admin.list 等 API |
+| admin 操作日志页 UI | 接 operation.log.list |
 
 ### 手工 / UI 联调
 
