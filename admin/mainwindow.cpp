@@ -1226,7 +1226,7 @@ void MainWindow::goToStationPiles(int stationId)
     }
 
     resetAllBtnSelect();
-    ui->btnPile->setProperty(QStringLiteral("selected"), true);
+    ui->btnPile->setProperty("selected", true);
     ui->btnPile->setStyleSheet(ui->btnPile->styleSheet());
 
     loadStationCombo();
