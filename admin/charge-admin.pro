@@ -12,6 +12,7 @@ SOURCES += \
     pileadddialog.cpp \
     orderdetaildialog.cpp \
     stationeditdialog.cpp \
+    stationdetaildialog.cpp \
     qcustomplot.cpp
 HEADERS += \
     apiclient.h \
@@ -22,6 +23,7 @@ HEADERS += \
     pileadddialog.h \
     orderdetaildialog.h \
     stationeditdialog.h \
+    stationdetaildialog.h \
     qcustomplot.h
 FORMS += \
     mainwindow.ui \
@@ -29,4 +31,5 @@ FORMS += \
     pilestatusdialog.ui \
     pileadddialog.ui \
     orderdetaildialog.ui \
-    stationeditdialog.ui
+    stationeditdialog.ui \
+    stationdetaildialog.ui

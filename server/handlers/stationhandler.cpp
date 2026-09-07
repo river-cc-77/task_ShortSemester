@@ -128,7 +128,7 @@ QJsonObject StationHandler::list(const QString &id, const QString &token, const 
 QJsonObject StationHandler::detail(const QString &id, const QString &token, const QJsonObject &data)
 {
     SessionInfo session;
-    const QJsonObject auth = authUser(id, token, session);
+    const QJsonObject auth = authUserOrAdmin(id, token, session);
     if (!auth.isEmpty()) return auth;
 
     if (!data.contains("station_id")) {

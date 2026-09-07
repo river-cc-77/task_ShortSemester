@@ -290,7 +290,7 @@ QPushButton:hover{
         QStringLiteral("电价"),
         QStringLiteral("电桩数"),
         QStringLiteral("闲置桩"),
-        QStringLiteral("在线率"),
+        QStringLiteral("可用率"),
         QStringLiteral("创建时间"),
         QStringLiteral("操作"),
     });
@@ -1171,11 +1171,21 @@ void MainWindow::addStationRow(const QJsonObject &obj)
     QHBoxLayout *layout = new QHBoxLayout(container);
     layout->setContentsMargins(4, 2, 4, 2);
 
+    QPushButton *btnDetail = new QPushButton(QStringLiteral("详情"));
+    QPushButton *btnPiles = new QPushButton(QStringLiteral("电桩"));
     QPushButton *btnEdit = new QPushButton(QStringLiteral("编辑"));
     QPushButton *btnDelete = new QPushButton(QStringLiteral("删除"));
+    layout->addWidget(btnDetail);
+    layout->addWidget(btnPiles);
     layout->addWidget(btnEdit);
     layout->addWidget(btnDelete);
 
+    connect(btnDetail, &QPushButton::clicked, this, [=]() {
+        onStationDetailClicked(obj);
+    });
+    connect(btnPiles, &QPushButton::clicked, this, [=]() {
+        goToStationPiles(obj.value(QStringLiteral("id")).toInt());
+    });
     connect(btnEdit, &QPushButton::clicked, this, [=]() {
         onEditStationClicked(obj);
     });
@@ -1184,6 +1194,59 @@ void MainWindow::addStationRow(const QJsonObject &obj)
     });
 
     ui->tableStation->setCellWidget(row, 8, container);
+}
+
+void MainWindow::onStationDetailClicked(const QJsonObject &station)
+{
+    const int stationId = station.value(QStringLiteral("id")).toInt();
+    QJsonObject params;
+    params[QStringLiteral("station_id")] = stationId;
+    const QJsonObject resp = m_api->call(QStringLiteral("station.detail"), params);
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        const QString errMsg = resp.value(QStringLiteral("error")).toObject()
+                                   .value(QStringLiteral("message")).toString(
+                                       QStringLiteral("获取电站详情失败"));
+        QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        return;
+    }
+
+    StationDetailDialog dlg(this);
+    dlg.setDetail(resp.value(QStringLiteral("data")).toObject());
+    connect(&dlg, &StationDetailDialog::viewPilesRequested, this, [this, &dlg](int sid) {
+        dlg.accept();
+        goToStationPiles(sid);
+    });
+    dlg.exec();
+}
+
+void MainWindow::goToStationPiles(int stationId)
+{
+    if (stationId <= 0) {
+        return;
+    }
+
+    resetAllBtnSelect();
+    ui->btnPile->setProperty(QStringLiteral("selected"), true);
+    ui->btnPile->setStyleSheet(ui->btnPile->styleSheet());
+
+    loadStationCombo();
+
+    int targetIndex = 0;
+    for (int i = 0; i < ui->comboStation->count(); ++i) {
+        if (ui->comboStation->itemData(i).toInt() == stationId) {
+            targetIndex = i;
+            break;
+        }
+    }
+    ui->comboStation->setCurrentIndex(targetIndex);
+    ui->lineEditPileId->clear();
+    ui->comboPileStatus->setCurrentText(QStringLiteral("全部状态"));
+
+    // 先设好筛选再切页，避免 currentChanged 里 reload 覆盖为「全部电站」
+    ui->stackedWidget->blockSignals(true);
+    ui->stackedWidget->setCurrentIndex(1);
+    ui->stackedWidget->blockSignals(false);
+    reloadPileList();
 }
 
 void MainWindow::onAddStationClicked()

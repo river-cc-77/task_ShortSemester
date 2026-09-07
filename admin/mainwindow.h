@@ -9,6 +9,7 @@
 #include "pileadddialog.h"
 #include "orderdetaildialog.h"
 #include "stationeditdialog.h"
+#include "stationdetaildialog.h"
 class ApiClient;
 namespace Ui {
 class MainWindow;
@@ -49,6 +50,8 @@ private slots:
     void onAddStationClicked();
     void onEditStationClicked(const QJsonObject &station);
     void onDeleteStationClicked(const QJsonObject &station);
+    void onStationDetailClicked(const QJsonObject &station);
+    void goToStationPiles(int stationId);
 
     void reloadOperationLogList();
     void addOperationLogRow(const QJsonObject &obj);

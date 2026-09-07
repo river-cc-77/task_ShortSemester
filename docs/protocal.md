@@ -312,6 +312,8 @@
 
 ### 4.3 `station.detail`
 
+用户端/管理端均可调用（`user` 或 `admin` token）。
+
 **请求 data：** `{ "station_id": 1 }`
 
 **响应 data：**
