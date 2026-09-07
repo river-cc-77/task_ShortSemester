@@ -625,8 +625,15 @@ def test_admin_pile_page_api(host: str, port: int, token: str, admin_token: str)
     if not by_station["data"]["items"]:
         raise RuntimeError("station_id=1 should return piles")
 
-    pile_no = "SZ005-05"
-    orig_power = db_query_scalar(db, "SELECT power_kw FROM pile WHERE pile_no = ?", (pile_no,))
+    sz005_idle = [
+        row
+        for row in items
+        if row.get("pile_no", "").startswith("SZ005") and row.get("status") == "闲置"
+    ]
+    if not sz005_idle:
+        raise RuntimeError("need idle SZ005 pile for update/restart tests (run make_db.py?)")
+    pile_no = sz005_idle[0]["pile_no"]
+    orig_power = float(sz005_idle[0]["power_kw"])
     log_cnt_before = db_query_scalar(db, "SELECT COUNT(*) FROM operation_log")
 
     run_test(
