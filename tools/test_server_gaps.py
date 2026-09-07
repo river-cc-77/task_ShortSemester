@@ -328,6 +328,22 @@ def test_pile_delete_busy(host: str, port: int, token8003: str, admin_token: str
     finish_order(host, port, token8003, order_no, admin_token)
 
 
+def test_pile_delete_open_and_history(host: str, port: int, admin_token: str) -> None:
+    print("\n========== D2. pile.delete 待支付/历史订单 ==========")
+    run_test_error(
+        host, port,
+        {"id": "D3", "cmd": "pile.delete", "token": admin_token, "data": {"pile_no": "SZ001-05"}},
+        "pile.delete on 待支付 order pile (idle status)",
+        "INVALID_PARAM",
+    )
+    run_test_error(
+        host, port,
+        {"id": "D4", "cmd": "pile.delete", "token": admin_token, "data": {"pile_no": "SZ001-02"}},
+        "pile.delete on pile with completed orders",
+        "INVALID_PARAM",
+    )
+
+
 def test_admin_settle_duplicate(host: str, port: int, admin_token: str) -> None:
     print("\n========== E. order.admin.settle 重复结算 ==========")
     lst = run_test(
@@ -477,6 +493,7 @@ def main() -> int:
     test_unpaid_pile_still_reservable(host, port, token, token8002)
     test_order_list_filters(host, port, admin_token)
     test_pile_delete_busy(host, port, token8003, admin_token)
+    test_pile_delete_open_and_history(host, port, admin_token)
     test_admin_settle_duplicate(host, port, admin_token)
     test_station_create_validation(host, port, admin_token)
     test_low_priority(host, port, token, admin_token)

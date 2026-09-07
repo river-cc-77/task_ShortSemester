@@ -129,6 +129,9 @@
 | `pile.create` | 管理端 | P2 | 新增电桩 |
 | `station.admin.list` | 管理端 | P1 | 电站管理列表 |
 | `station.create` | 管理端 | P1 | 新增电站 |
+| `station.update` | 管理端 | P1 | 修改电站 |
+| `station.delete` | 管理端 | P1 | 删除电站（有订单/使用中桩时禁止） |
+| `operation_log.list` | 管理端 | P1 | 操作日志列表 |
 | `user.admin.list` | 管理端 | P1 | 用户列表 |
 | `user.freeze` | 管理端 | P1 | 冻结/解冻 |
 | `order.admin.settle` | 管理端 | P1 | 代结算 |
@@ -691,9 +694,49 @@ amount = round(kwh × station.price, 2)
 
 服务端按数量自动生成电桩编号。
 
+**update 请求 data：**
+
+```json
+{
+  "station_id": 6,
+  "name": "新名称",
+  "address": "深圳市...",
+  "lat": 22.54,
+  "lng": 114.05,
+  "price": 1.30
+}
+```
+
+**delete 请求 data：** `{ "station_id": 6 }`
+
+删除规则（任一满足则拒绝）：
+
+1. 存在未完成订单（预约/充电中/待支付）
+2. 存在使用中电桩（预约/在用）
+3. 存在历史订单记录（已完成订单保留审计，不可删站）
+
 ---
 
-### 4.20 `user.admin.list` / `user.freeze`
+### 4.20 `operation_log.list`
+
+**请求 data：**
+
+```json
+{
+  "action": "代结算",
+  "date_from": "2026-08-01",
+  "date_to": "2026-09-30",
+  "limit": 100
+}
+```
+
+`action` 可省略表示全部。
+
+**响应 items[]：** id, admin_id, admin_username, action, target_type, target_id, detail, created_at
+
+---
+
+### 4.21 `user.admin.list` / `user.freeze`
 
 **list 请求 data：** `{ "phone_keyword": "138" }`
 
@@ -704,7 +747,7 @@ amount = round(kwh × station.price, 2)
 
 ---
 
-### 4.21 `order.admin.settle`
+### 4.22 `order.admin.settle`
 
 管理员代用户结算待支付订单。逻辑同 `charge.settle`，须写 `operation_log`。
 
@@ -723,7 +766,7 @@ amount = round(kwh × station.price, 2)
 - `pile.create` — 新增电桩（station_id / type / power_kw，pile_no 可选自动生成）
 - `pile.detail` — 查询电桩详情及当前未完成订单
 - `pile.update` — 修改 type / power_kw / status
-- `pile.delete` — 删除空闲电桩（在用/预约中禁止删除）
+- `pile.delete` — 删除电桩；**预约/在用**、**未完成订单**或**历史订单**关联时禁止删除
 
 ### 5.3 `forecast.list`
 

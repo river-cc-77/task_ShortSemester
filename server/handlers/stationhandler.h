@@ -19,6 +19,12 @@ public:
     // 管理端：新增电站（自动生成电桩）
     static QJsonObject create(const QString &id, const QString &token, const QJsonObject &data);
 
+    // 管理端：修改电站
+    static QJsonObject update(const QString &id, const QString &token, const QJsonObject &data);
+
+    // 管理端：删除电站（有未完成订单或历史订单时禁止）
+    static QJsonObject remove(const QString &id, const QString &token, const QJsonObject &data);
+
     // 用户端：收藏电站
     static QJsonObject favoriteAdd(const QString &id, const QString &token, const QJsonObject &data);
 

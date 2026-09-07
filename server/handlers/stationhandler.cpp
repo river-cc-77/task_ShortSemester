@@ -213,6 +213,100 @@ QJsonObject StationHandler::create(const QString &id, const QString &token, cons
 }
 
 // ============================================================
+// station.update — 修改电站
+// ============================================================
+QJsonObject StationHandler::update(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    const QJsonObject auth = authAdmin(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    const int stationId = data.value("station_id").toInt();
+    if (stationId <= 0) {
+        return Protocol::makeError(id, "INVALID_PARAM", "缺少 station_id");
+    }
+
+    const auto detailOpt = DbManager::instance().fetchStationDetail(stationId);
+    if (!detailOpt.has_value()) {
+        return Protocol::makeError(id, "NOT_FOUND", "电站不存在");
+    }
+
+    const QString name = data.value("name").toString().trimmed();
+    const QString address = data.value("address").toString().trimmed();
+    const double lat = data.value("lat").toDouble();
+    const double lng = data.value("lng").toDouble();
+    const double price = data.value("price").toDouble();
+
+    if (name.isEmpty() || address.isEmpty()) {
+        return Protocol::makeError(id, "INVALID_PARAM", "站名和地址不能为空");
+    }
+    if (price <= 0) {
+        return Protocol::makeError(id, "INVALID_PARAM", "电价必须大于 0");
+    }
+    if (DbManager::instance().stationNameExists(name, stationId)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "站名已存在");
+    }
+
+    if (!DbManager::instance().updateStation(stationId, name, address, lat, lng, price)) {
+        return Protocol::makeError(id, "DB_ERROR", "更新电站失败");
+    }
+
+    DbManager::instance().writeOperationLog(
+        session.adminId, QStringLiteral("修改电站"),
+        QStringLiteral("station"), QString::number(stationId),
+        QString("站名: %1, 电价: %2").arg(name).arg(price));
+
+    QJsonObject responseData;
+    responseData["station_id"] = stationId;
+    responseData["name"] = name;
+    return Protocol::makeSuccess(id, responseData);
+}
+
+// ============================================================
+// station.delete — 删除电站
+// ============================================================
+QJsonObject StationHandler::remove(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    const QJsonObject auth = authAdmin(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    const int stationId = data.value("station_id").toInt();
+    if (stationId <= 0) {
+        return Protocol::makeError(id, "INVALID_PARAM", "缺少 station_id");
+    }
+
+    const auto detailOpt = DbManager::instance().fetchStationDetail(stationId);
+    if (!detailOpt.has_value()) {
+        return Protocol::makeError(id, "NOT_FOUND", "电站不存在");
+    }
+    const QString stationName = detailOpt.value().value("name").toString();
+
+    if (DbManager::instance().stationHasOpenOrders(stationId)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "该电站存在未完成订单，无法删除");
+    }
+    if (DbManager::instance().stationHasBusyPiles(stationId)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "该电站有电桩使用中，无法删除");
+    }
+    if (DbManager::instance().stationHasAnyOrders(stationId)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "该电站存在历史订单记录，无法删除");
+    }
+
+    if (!DbManager::instance().deleteStation(stationId)) {
+        return Protocol::makeError(id, "DB_ERROR", "删除电站失败");
+    }
+
+    DbManager::instance().writeOperationLog(
+        session.adminId, QStringLiteral("删除电站"),
+        QStringLiteral("station"), QString::number(stationId),
+        QString("已删除电站: %1").arg(stationName));
+
+    QJsonObject responseData;
+    responseData["station_id"] = stationId;
+    return Protocol::makeSuccess(id, responseData);
+}
+
+// ============================================================
 // station.favorite.add — 收藏电站
 // ============================================================
 QJsonObject StationHandler::favoriteAdd(const QString &id, const QString &token, const QJsonObject &data)

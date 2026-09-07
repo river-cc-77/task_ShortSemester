@@ -8,6 +8,7 @@
 #include "pilestatusdialog.h"
 #include "pileadddialog.h"
 #include "orderdetaildialog.h"
+#include "stationeditdialog.h"
 class ApiClient;
 namespace Ui {
 class MainWindow;
@@ -43,6 +44,15 @@ private slots:
     void onOrderDetailClicked(const QJsonObject &order);
     void onOrderAdminSettle(const QString &orderNo);
 
+    void reloadStationList();
+    void addStationRow(const QJsonObject &obj);
+    void onAddStationClicked();
+    void onEditStationClicked(const QJsonObject &station);
+    void onDeleteStationClicked(const QJsonObject &station);
+
+    void reloadOperationLogList();
+    void addOperationLogRow(const QJsonObject &obj);
+
     // 电桩编辑弹窗槽函数
     void onEditPileBtnClicked(const QString& pileNo);
 
@@ -50,6 +60,7 @@ private:
     Ui::MainWindow *ui;
     ApiClient *m_api = nullptr;
     bool m_refreshBusy = false;
+    QJsonArray m_stationItems;
     void resetAllBtnSelect();
     void drawRevenueChartFromJson(const QJsonArray& trendArr);
     // 根据桩号查找表格行号工具函数

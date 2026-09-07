@@ -375,6 +375,7 @@ QJsonArray DbManager::fetchAdminStations()
     query.prepare(
         "SELECT s.id, s.name, s.address, s.lat, s.lng, s.price, s.created_at, "
         "(SELECT COUNT(*) FROM pile p WHERE p.station_id = s.id) AS total_piles, "
+        "(SELECT COUNT(*) FROM pile p WHERE p.station_id = s.id AND p.status = '闲置') AS idle_piles, "
         "(SELECT COUNT(*) FROM pile p WHERE p.station_id = s.id AND p.status != '故障') AS online_piles "
         "FROM station s ORDER BY s.id");
 
@@ -393,6 +394,7 @@ QJsonArray DbManager::fetchAdminStations()
         row["lng"] = query.value("lng").toDouble();
         row["price"] = query.value("price").toDouble();
         row["total_piles"] = query.value("total_piles").toInt();
+        row["idle_piles"] = query.value("idle_piles").toInt();
         const int total = query.value("total_piles").toInt();
         const int online = query.value("online_piles").toInt();
         row["online_rate"] = total > 0 ? qRound(online * 1000.0 / total) / 1000.0 : 0.0;
@@ -402,15 +404,103 @@ QJsonArray DbManager::fetchAdminStations()
     return items;
 }
 
-bool DbManager::stationNameExists(const QString &name)
+bool DbManager::stationNameExists(const QString &name, int excludeStationId)
 {
     QSqlQuery query(m_db);
-    query.prepare("SELECT COUNT(*) FROM station WHERE name = :name");
+    if (excludeStationId > 0) {
+        query.prepare("SELECT COUNT(*) FROM station WHERE name = :name AND id != :id");
+        query.bindValue(":id", excludeStationId);
+    } else {
+        query.prepare("SELECT COUNT(*) FROM station WHERE name = :name");
+    }
     query.bindValue(":name", name);
     if (!query.exec() || !query.next()) {
         return false;
     }
     return query.value(0).toInt() > 0;
+}
+
+bool DbManager::updateStation(int stationId, const QString &name, const QString &address,
+                              double lat, double lng, double price)
+{
+    QSqlQuery query(m_db);
+    query.prepare(
+        "UPDATE station SET name = :name, address = :address, lat = :lat, lng = :lng, price = :price "
+        "WHERE id = :id");
+    query.bindValue(":name", name);
+    query.bindValue(":address", address);
+    query.bindValue(":lat", lat);
+    query.bindValue(":lng", lng);
+    query.bindValue(":price", price);
+    query.bindValue(":id", stationId);
+    return query.exec() && query.numRowsAffected() > 0;
+}
+
+bool DbManager::stationHasOpenOrders(int stationId)
+{
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT COUNT(*) FROM charge_order "
+        "WHERE station_id = :sid AND status IN ('预约', '充电中', '待支付')");
+    query.bindValue(":sid", stationId);
+    if (!query.exec() || !query.next()) {
+        return false;
+    }
+    return query.value(0).toInt() > 0;
+}
+
+bool DbManager::stationHasBusyPiles(int stationId)
+{
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT COUNT(*) FROM pile "
+        "WHERE station_id = :sid AND status IN ('预约', '在用')");
+    query.bindValue(":sid", stationId);
+    if (!query.exec() || !query.next()) {
+        return false;
+    }
+    return query.value(0).toInt() > 0;
+}
+
+bool DbManager::stationHasAnyOrders(int stationId)
+{
+    QSqlQuery query(m_db);
+    query.prepare("SELECT COUNT(*) FROM charge_order WHERE station_id = :sid");
+    query.bindValue(":sid", stationId);
+    if (!query.exec() || !query.next()) {
+        return false;
+    }
+    return query.value(0).toInt() > 0;
+}
+
+bool DbManager::deleteStation(int stationId)
+{
+    if (stationHasOpenOrders(stationId) || stationHasBusyPiles(stationId)
+        || stationHasAnyOrders(stationId)) {
+        return false;
+    }
+
+    const bool ok = runInTransaction([&]() {
+        QSqlQuery fav(m_db);
+        fav.prepare("DELETE FROM favorite_station WHERE station_id = :sid");
+        fav.bindValue(":sid", stationId);
+        if (!fav.exec()) {
+            return false;
+        }
+
+        QSqlQuery forecast(m_db);
+        forecast.prepare("DELETE FROM load_forecast WHERE station_id = :sid");
+        forecast.bindValue(":sid", stationId);
+        if (!forecast.exec()) {
+            return false;
+        }
+
+        QSqlQuery station(m_db);
+        station.prepare("DELETE FROM station WHERE id = :sid");
+        station.bindValue(":sid", stationId);
+        return station.exec() && station.numRowsAffected() > 0;
+    });
+    return ok;
 }
 
 int DbManager::createStation(const QString &name, const QString &address,
@@ -712,6 +802,20 @@ bool DbManager::pileHasActiveOrders(const QString &pileNo)
         "SELECT COUNT(*) FROM charge_order o "
         "JOIN pile p ON o.pile_id = p.id "
         "WHERE p.pile_no = :no AND o.status IN ('预约', '充电中')");
+    query.bindValue(":no", pileNo);
+    if (!query.exec() || !query.next()) {
+        return false;
+    }
+    return query.value(0).toInt() > 0;
+}
+
+bool DbManager::pileHasAnyOrders(const QString &pileNo)
+{
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT COUNT(*) FROM charge_order o "
+        "JOIN pile p ON o.pile_id = p.id "
+        "WHERE p.pile_no = :no");
     query.bindValue(":no", pileNo);
     if (!query.exec() || !query.next()) {
         return false;
@@ -1345,6 +1449,60 @@ bool DbManager::writeOperationLog(int adminId, const QString &action,
         return false;
     }
     return true;
+}
+
+QJsonArray DbManager::fetchOperationLogs(const QString &action, const QString &dateFrom,
+                                         const QString &dateTo, int limit)
+{
+    QSqlQuery query(m_db);
+    QString sql =
+        "SELECT o.id, o.admin_id, a.username AS admin_username, o.action, "
+        "o.target_type, o.target_id, o.detail, o.created_at "
+        "FROM operation_log o "
+        "LEFT JOIN admin a ON o.admin_id = a.id "
+        "WHERE 1=1";
+    if (!action.isEmpty()) {
+        sql += " AND o.action = :action";
+    }
+    if (!dateFrom.isEmpty()) {
+        sql += " AND date(o.created_at) >= :date_from";
+    }
+    if (!dateTo.isEmpty()) {
+        sql += " AND date(o.created_at) <= :date_to";
+    }
+    sql += " ORDER BY o.id DESC LIMIT :limit";
+
+    query.prepare(sql);
+    if (!action.isEmpty()) {
+        query.bindValue(":action", action);
+    }
+    if (!dateFrom.isEmpty()) {
+        query.bindValue(":date_from", dateFrom);
+    }
+    if (!dateTo.isEmpty()) {
+        query.bindValue(":date_to", dateTo);
+    }
+    query.bindValue(":limit", limit > 0 ? limit : 100);
+
+    QJsonArray items;
+    if (!query.exec()) {
+        qWarning() << "fetchOperationLogs failed:" << query.lastError().text();
+        return items;
+    }
+
+    while (query.next()) {
+        QJsonObject row;
+        row["id"] = query.value("id").toInt();
+        row["admin_id"] = query.value("admin_id").toInt();
+        row["admin_username"] = query.value("admin_username").toString();
+        row["action"] = query.value("action").toString();
+        row["target_type"] = query.value("target_type").toString();
+        row["target_id"] = query.value("target_id").toString();
+        row["detail"] = query.value("detail").toString();
+        row["created_at"] = query.value("created_at").toString();
+        items.append(row);
+    }
+    return items;
 }
 
 bool DbManager::writeWalletLog(int userId, double delta, const QString &reason, int orderId)

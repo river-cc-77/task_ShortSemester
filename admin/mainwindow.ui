@@ -727,19 +727,51 @@ QPushButton#btnRefresh, QPushButton#btnShowChart
        </layout>
       </widget>
       <widget class="QWidget" name="page_2">
-       <widget class="QLabel" name="labelStationPage">
-        <property name="geometry">
-         <rect>
-          <x>216</x>
-          <y>220</y>
-          <width>161</width>
-          <height>20</height>
-         </rect>
-        </property>
-        <property name="text">
-         <string>电站管理页面</string>
-        </property>
-       </widget>
+       <layout class="QVBoxLayout" name="verticalLayout_station">
+        <item>
+         <widget class="QWidget" name="widget_stationFilter" native="true">
+          <layout class="QHBoxLayout" name="horizontalLayout_stationFilter">
+           <item>
+            <widget class="QLineEdit" name="editStationKeyword">
+             <property name="placeholderText">
+              <string>站名/地址关键字</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnStationQuery">
+             <property name="minimumSize">
+              <size>
+               <width>100</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>查询</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnStationAdd">
+             <property name="text">
+              <string>新增电站</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QTableWidget" name="tableStation">
+          <property name="selectionBehavior">
+           <enum>QAbstractItemView::SelectRows</enum>
+          </property>
+          <property name="alternatingRowColors">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </widget>
       <widget class="QWidget" name="page_3">
        <layout class="QVBoxLayout" name="verticalLayout_6">
@@ -786,19 +818,74 @@ QPushButton#btnRefresh, QPushButton#btnShowChart
        </layout>
       </widget>
       <widget class="QWidget" name="page_4">
-       <widget class="QLabel" name="labelLogPage">
-        <property name="geometry">
-         <rect>
-          <x>290</x>
-          <y>220</y>
-          <width>291</width>
-          <height>17</height>
-         </rect>
-        </property>
-        <property name="text">
-         <string>操作日志页面</string>
-        </property>
-       </widget>
+       <layout class="QVBoxLayout" name="verticalLayout_log">
+        <item>
+         <widget class="QWidget" name="widget_logFilter" native="true">
+          <layout class="QHBoxLayout" name="horizontalLayout_logFilter">
+           <item>
+            <widget class="QComboBox" name="comboLogAction">
+             <property name="minimumSize">
+              <size>
+               <width>140</width>
+               <height>0</height>
+              </size>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QDateEdit" name="dateLogFrom">
+             <property name="calendarPopup">
+              <bool>true</bool>
+             </property>
+             <property name="displayFormat">
+              <string>yyyy-MM-dd</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="labelLogDateSep">
+             <property name="text">
+              <string>至</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QDateEdit" name="dateLogTo">
+             <property name="calendarPopup">
+              <bool>true</bool>
+             </property>
+             <property name="displayFormat">
+              <string>yyyy-MM-dd</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btnLogQuery">
+             <property name="minimumSize">
+              <size>
+               <width>100</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>查询</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QTableWidget" name="tableLog">
+          <property name="selectionBehavior">
+           <enum>QAbstractItemView::SelectRows</enum>
+          </property>
+          <property name="alternatingRowColors">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </widget>
       <widget class="QWidget" name="page_5">
        <layout class="QVBoxLayout" name="verticalLayout_9" stretch="0,1">

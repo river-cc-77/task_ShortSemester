@@ -921,6 +921,128 @@ def test_admin_order_page_api(host: str, port: int, admin_token: str) -> None:
             raise RuntimeError(f"phone filter leak: {row}")
 
 
+def test_station_crud_and_operation_log(host: str, port: int, admin_token: str) -> None:
+    print("\n========== K. 电站 CRUD + 操作日志 ==========")
+
+    stations = run_test(
+        host,
+        port,
+        {"id": "K1", "cmd": "station.admin.list", "token": admin_token, "data": {}},
+        "station.admin.list",
+    )
+    items = stations["data"]["items"]
+    if not items:
+        raise RuntimeError("station.admin.list empty")
+    for row in items:
+        for field in ("id", "name", "address", "price", "total_piles", "idle_piles", "online_rate"):
+            if field not in row:
+                raise RuntimeError(f"station.admin.list missing {field}: {row}")
+
+    created = run_test(
+        host,
+        port,
+        {
+            "id": "K2",
+            "cmd": "station.create",
+            "token": admin_token,
+            "data": {
+                "name": "测试删除站K",
+                "address": "深圳市测试区1号",
+                "lat": 22.55,
+                "lng": 114.06,
+                "price": 1.25,
+                "fast_count": 1,
+                "slow_count": 1,
+            },
+        },
+        "station.create for delete test",
+    )
+    station_id = created["data"]["station_id"]
+
+    run_test(
+        host,
+        port,
+        {
+            "id": "K3",
+            "cmd": "station.update",
+            "token": admin_token,
+            "data": {
+                "station_id": station_id,
+                "name": "测试删除站K-改",
+                "address": "深圳市测试区2号",
+                "lat": 22.56,
+                "lng": 114.07,
+                "price": 1.35,
+            },
+        },
+        "station.update",
+    )
+
+    run_test_error(
+        host,
+        port,
+        {
+            "id": "K4",
+            "cmd": "station.delete",
+            "token": admin_token,
+            "data": {"station_id": 1},
+        },
+        "station.delete blocked (history orders)",
+        "INVALID_PARAM",
+    )
+
+    run_test(
+        host,
+        port,
+        {
+            "id": "K5",
+            "cmd": "station.delete",
+            "token": admin_token,
+            "data": {"station_id": station_id},
+        },
+        "station.delete empty test station",
+    )
+
+    logs = run_test(
+        host,
+        port,
+        {
+            "id": "K6",
+            "cmd": "operation_log.list",
+            "token": admin_token,
+            "data": {"date_from": "2026-08-01", "date_to": "2026-09-30", "limit": 50},
+        },
+        "operation_log.list",
+    )
+    log_items = logs["data"]["items"]
+    if not log_items:
+        raise RuntimeError("operation_log.list empty after station ops")
+    for row in log_items:
+        for field in ("action", "created_at", "admin_username"):
+            if field not in row:
+                raise RuntimeError(f"operation_log.list missing {field}: {row}")
+
+    filtered = run_test(
+        host,
+        port,
+        {
+            "id": "K7",
+            "cmd": "operation_log.list",
+            "token": admin_token,
+            "data": {
+                "action": "修改电站",
+                "date_from": "2026-08-01",
+                "date_to": "2026-09-30",
+                "limit": 20,
+            },
+        },
+        "operation_log.list action filter",
+    )
+    for row in filtered["data"]["items"]:
+        if row.get("action") != "修改电站":
+            raise RuntimeError(f"operation_log action filter leak: {row}")
+
+
 def main() -> int:
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 9000
@@ -955,6 +1077,7 @@ def main() -> int:
     test_admin_pile_page_api(host, port, token, admin_token)
     test_admin_pile_detail_and_create(host, port, token, admin_token)
     test_admin_order_page_api(host, port, admin_token)
+    test_station_crud_and_operation_log(host, port, admin_token)
     test_tx_reserve_consistency(host, port, token, admin_token)
     test_tx_settle_consistency(host, port, token, admin_token)
     test_tx_settle_insufficient_no_partial(host, port, admin_token)

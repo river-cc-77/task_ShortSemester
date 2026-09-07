@@ -33,10 +33,16 @@ public:
     QJsonArray fetchStations(const QString &keyword);
     std::optional<QJsonObject> fetchStationDetail(int stationId);
     QJsonArray fetchAdminStations();
-    bool stationNameExists(const QString &name);
+    bool stationNameExists(const QString &name, int excludeStationId = 0);
     int createStation(const QString &name, const QString &address,
                       double lat, double lng, double price,
                       int fastCount, int slowCount);
+    bool updateStation(int stationId, const QString &name, const QString &address,
+                       double lat, double lng, double price);
+    bool stationHasOpenOrders(int stationId);
+    bool stationHasBusyPiles(int stationId);
+    bool stationHasAnyOrders(int stationId);
+    bool deleteStation(int stationId);
 
     // ===== 电桩 =====
     std::optional<QJsonObject> findPileByNo(const QString &pileNo);
@@ -53,6 +59,7 @@ public:
     std::optional<QJsonObject> fetchPileDetail(const QString &pileNo);
     bool pileHasOpenOrders(const QString &pileNo);
     bool pileHasActiveOrders(const QString &pileNo);
+    bool pileHasAnyOrders(const QString &pileNo);
 
     // ===== 订单 =====
     std::optional<QJsonObject> findOpenOrder(int userId);
@@ -92,6 +99,8 @@ public:
                            const QString &targetType = QString(),
                            const QString &targetId = QString(),
                            const QString &detail = QString());
+    QJsonArray fetchOperationLogs(const QString &action, const QString &dateFrom,
+                                  const QString &dateTo, int limit);
     bool writeWalletLog(int userId, double delta, const QString &reason, int orderId = 0);
 
 private:

@@ -208,9 +208,11 @@ QJsonObject AdminHandler::pileDelete(const QString &id, const QString &token, co
         return Protocol::makeError(id, "INVALID_PARAM", "该电桩使用中，无法删除");
     }
 
-    // 检查是否存在未完成订单（预约/充电中/待支付）
     if (DbManager::instance().pileHasOpenOrders(pileNo)) {
-        return Protocol::makeError(id, "INVALID_PARAM", "该电桩使用中，无法删除");
+        return Protocol::makeError(id, "INVALID_PARAM", "该电桩存在未完成订单，无法删除");
+    }
+    if (DbManager::instance().pileHasAnyOrders(pileNo)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "该电桩存在历史订单记录，无法删除");
     }
 
     if (!DbManager::instance().deletePile(pileNo)) {
@@ -296,5 +298,31 @@ QJsonObject AdminHandler::pileCreate(const QString &id, const QString &token, co
     responseData["type"] = type;
     responseData["power_kw"] = powerKw;
     responseData["status"] = QStringLiteral("闲置");
+    return Protocol::makeSuccess(id, responseData);
+}
+
+// ============================================================
+// operation_log.list — 操作日志列表
+// ============================================================
+QJsonObject AdminHandler::operationLogList(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    if (!AuthManager::instance().validateToken(token, session)) {
+        return Protocol::makeError(id, "UNAUTHORIZED", "未登录或 token 无效");
+    }
+    if (session.role != QStringLiteral("admin")) {
+        return Protocol::makeError(id, "FORBIDDEN", "需要管理员登录");
+    }
+    if (!DbManager::instance().isOpen()) {
+        return Protocol::makeError(id, "DB_ERROR", "数据库未打开");
+    }
+
+    const QString action = data.value("action").toString().trimmed();
+    const QString dateFrom = data.value("date_from").toString().trimmed();
+    const QString dateTo = data.value("date_to").toString().trimmed();
+    const int limit = data.value("limit").toInt(100);
+
+    QJsonObject responseData;
+    responseData["items"] = DbManager::instance().fetchOperationLogs(action, dateFrom, dateTo, limit);
     return Protocol::makeSuccess(id, responseData);
 }

@@ -168,6 +168,14 @@ QPushButton:hover{
         {
             reloadOrderList();
         }
+        else if(index == 2)
+        {
+            reloadStationList();
+        }
+        else if(index == 4)
+        {
+            reloadOperationLogList();
+        }
     });
 
     // 用户搜索
@@ -271,6 +279,69 @@ QPushButton:hover{
     });
     connect(ui->editOrderPhone, &QLineEdit::returnPressed, this, [=]() {
         reloadOrderList();
+    });
+
+    //==================== 电站管理初始化 ====================
+    ui->tableStation->setColumnCount(9);
+    ui->tableStation->setHorizontalHeaderLabels({
+        QStringLiteral("ID"),
+        QStringLiteral("站名"),
+        QStringLiteral("地址"),
+        QStringLiteral("电价"),
+        QStringLiteral("电桩数"),
+        QStringLiteral("闲置桩"),
+        QStringLiteral("在线率"),
+        QStringLiteral("创建时间"),
+        QStringLiteral("操作"),
+    });
+    ui->tableStation->verticalHeader()->setVisible(false);
+    ui->tableStation->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ui->tableStation->verticalHeader()->setDefaultSectionSize(44);
+    ui->tableStation->setAlternatingRowColors(true);
+    ui->tableStation->setStyleSheet(ui->tableUser->styleSheet());
+
+    connect(ui->btnStationQuery, &QPushButton::clicked, this, [=]() {
+        reloadStationList();
+    });
+    connect(ui->editStationKeyword, &QLineEdit::returnPressed, this, [=]() {
+        reloadStationList();
+    });
+    connect(ui->btnStationAdd, &QPushButton::clicked, this, &MainWindow::onAddStationClicked);
+
+    //==================== 操作日志初始化 ====================
+    ui->comboLogAction->addItem(QStringLiteral("全部操作"));
+    ui->comboLogAction->addItem(QStringLiteral("新增电站"));
+    ui->comboLogAction->addItem(QStringLiteral("修改电站"));
+    ui->comboLogAction->addItem(QStringLiteral("删除电站"));
+    ui->comboLogAction->addItem(QStringLiteral("新增电桩"));
+    ui->comboLogAction->addItem(QStringLiteral("修改电桩"));
+    ui->comboLogAction->addItem(QStringLiteral("删除电桩"));
+    ui->comboLogAction->addItem(QStringLiteral("远程重启电桩"));
+    ui->comboLogAction->addItem(QStringLiteral("冻结用户"));
+    ui->comboLogAction->addItem(QStringLiteral("解冻用户"));
+    ui->comboLogAction->addItem(QStringLiteral("代结算"));
+    ui->dateLogFrom->setCalendarPopup(true);
+    ui->dateLogTo->setCalendarPopup(true);
+    ui->dateLogFrom->setDate(QDate(2026, 8, 1));
+    ui->dateLogTo->setDate(QDate(2026, 9, 30));
+
+    ui->tableLog->setColumnCount(6);
+    ui->tableLog->setHorizontalHeaderLabels({
+        QStringLiteral("时间"),
+        QStringLiteral("管理员"),
+        QStringLiteral("操作"),
+        QStringLiteral("对象类型"),
+        QStringLiteral("对象ID"),
+        QStringLiteral("详情"),
+    });
+    ui->tableLog->verticalHeader()->setVisible(false);
+    ui->tableLog->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ui->tableLog->verticalHeader()->setDefaultSectionSize(40);
+    ui->tableLog->setAlternatingRowColors(true);
+    ui->tableLog->setStyleSheet(ui->tableUser->styleSheet());
+
+    connect(ui->btnLogQuery, &QPushButton::clicked, this, [=]() {
+        reloadOperationLogList();
     });
 
 }
@@ -638,12 +709,32 @@ void MainWindow::batchDeletePile()
     auto ret = QMessageBox::question(this,"确认删除",QString("确定删除选中%1个电桩？").arg(pileNos.size()));
     if(ret != QMessageBox::Yes)
         return;
+    int okCount = 0;
+    int failCount = 0;
+    QString lastErr;
     for(const QString& no : pileNos)
     {
-        m_api->call("pile.delete", QJsonObject{{"pile_no", no}});
+        const QJsonObject r = m_api->call(QStringLiteral("pile.delete"), QJsonObject{{QStringLiteral("pile_no"), no}});
+        if (r.value(QStringLiteral("ok")).toBool()) {
+            ++okCount;
+        } else {
+            ++failCount;
+            lastErr = r.value(QStringLiteral("error")).toObject()
+                          .value(QStringLiteral("message")).toString(QStringLiteral("删除失败"));
+        }
     }
-    QMessageBox::information(this,"提示","批量删除指令已下发");
     reloadPileList();
+    if (failCount == 0) {
+        QMessageBox::information(this, QStringLiteral("提示"),
+                                 QStringLiteral("已成功删除 %1 个电桩").arg(okCount));
+    } else if (okCount == 0) {
+        QMessageBox::warning(this, QStringLiteral("失败"),
+                             QStringLiteral("删除失败：%1").arg(lastErr));
+    } else {
+        QMessageBox::warning(this, QStringLiteral("部分失败"),
+                             QStringLiteral("成功 %1 个，失败 %2 个。最近错误：%3")
+                                 .arg(okCount).arg(failCount).arg(lastErr));
+    }
 }
 
 // 图表
@@ -1023,5 +1114,195 @@ void MainWindow::onOrderAdminSettle(const QString &orderNo)
             QStringLiteral("代结算失败"));
         QMessageBox::warning(this, QStringLiteral("失败"), errMsg);
     }
+}
+
+void MainWindow::reloadStationList()
+{
+    ui->tableStation->setRowCount(0);
+    m_stationItems = QJsonArray();
+
+    const QJsonObject resp = m_api->call(QStringLiteral("station.admin.list"));
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        const QString errMsg = resp.value(QStringLiteral("error")).toObject()
+                                   .value(QStringLiteral("message")).toString(
+                                       QStringLiteral("获取电站列表失败"));
+        QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        return;
+    }
+
+    m_stationItems = resp.value(QStringLiteral("data")).toObject().value(QStringLiteral("items")).toArray();
+    const QString keyword = ui->editStationKeyword->text().trimmed();
+
+    for (const QJsonValue &value : m_stationItems) {
+        const QJsonObject obj = value.toObject();
+        if (!keyword.isEmpty()) {
+            const QString name = obj.value(QStringLiteral("name")).toString();
+            const QString address = obj.value(QStringLiteral("address")).toString();
+            if (!name.contains(keyword) && !address.contains(keyword)) {
+                continue;
+            }
+        }
+        addStationRow(obj);
+    }
+}
+
+void MainWindow::addStationRow(const QJsonObject &obj)
+{
+    const int row = ui->tableStation->rowCount();
+    ui->tableStation->insertRow(row);
+
+    auto mkReadOnly = [](const QString &text) {
+        auto *item = new QTableWidgetItem(text);
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        return item;
+    };
+
+    ui->tableStation->setItem(row, 0, mkReadOnly(QString::number(obj.value(QStringLiteral("id")).toInt())));
+    ui->tableStation->setItem(row, 1, mkReadOnly(obj.value(QStringLiteral("name")).toString()));
+    ui->tableStation->setItem(row, 2, mkReadOnly(obj.value(QStringLiteral("address")).toString()));
+    ui->tableStation->setItem(row, 3, mkReadOnly(QString::number(obj.value(QStringLiteral("price")).toDouble(), 'f', 2)));
+    ui->tableStation->setItem(row, 4, mkReadOnly(QString::number(obj.value(QStringLiteral("total_piles")).toInt())));
+    ui->tableStation->setItem(row, 5, mkReadOnly(QString::number(obj.value(QStringLiteral("idle_piles")).toInt())));
+    const double onlineRate = obj.value(QStringLiteral("online_rate")).toDouble();
+    ui->tableStation->setItem(row, 6, mkReadOnly(QStringLiteral("%1%").arg(onlineRate * 100.0, 0, 'f', 1)));
+    ui->tableStation->setItem(row, 7, mkReadOnly(obj.value(QStringLiteral("created_at")).toString()));
+
+    QWidget *container = new QWidget();
+    QHBoxLayout *layout = new QHBoxLayout(container);
+    layout->setContentsMargins(4, 2, 4, 2);
+
+    QPushButton *btnEdit = new QPushButton(QStringLiteral("编辑"));
+    QPushButton *btnDelete = new QPushButton(QStringLiteral("删除"));
+    layout->addWidget(btnEdit);
+    layout->addWidget(btnDelete);
+
+    connect(btnEdit, &QPushButton::clicked, this, [=]() {
+        onEditStationClicked(obj);
+    });
+    connect(btnDelete, &QPushButton::clicked, this, [=]() {
+        onDeleteStationClicked(obj);
+    });
+
+    ui->tableStation->setCellWidget(row, 8, container);
+}
+
+void MainWindow::onAddStationClicked()
+{
+    StationEditDialog dlg(this);
+    dlg.setCreateMode();
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QJsonObject resp = m_api->call(QStringLiteral("station.create"), dlg.getCreateParams());
+    if (resp.value(QStringLiteral("ok")).toBool()) {
+        QMessageBox::information(this, QStringLiteral("成功"), QStringLiteral("新增电站成功"));
+        reloadStationList();
+        loadStationCombo();
+    } else {
+        const QString errMsg = resp.value(QStringLiteral("error")).toObject()
+                                   .value(QStringLiteral("message")).toString(
+                                       QStringLiteral("新增失败"));
+        QMessageBox::warning(this, QStringLiteral("失败"), errMsg);
+    }
+}
+
+void MainWindow::onEditStationClicked(const QJsonObject &station)
+{
+    StationEditDialog dlg(this);
+    dlg.setEditMode(station);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QJsonObject resp = m_api->call(QStringLiteral("station.update"), dlg.getUpdateParams());
+    if (resp.value(QStringLiteral("ok")).toBool()) {
+        QMessageBox::information(this, QStringLiteral("成功"), QStringLiteral("电站信息已更新"));
+        reloadStationList();
+        loadStationCombo();
+    } else {
+        const QString errMsg = resp.value(QStringLiteral("error")).toObject()
+                                   .value(QStringLiteral("message")).toString(
+                                       QStringLiteral("更新失败"));
+        QMessageBox::warning(this, QStringLiteral("失败"), errMsg);
+    }
+}
+
+void MainWindow::onDeleteStationClicked(const QJsonObject &station)
+{
+    const int stationId = station.value(QStringLiteral("id")).toInt();
+    const QString name = station.value(QStringLiteral("name")).toString();
+    const auto ret = QMessageBox::question(
+        this,
+        QStringLiteral("删除确认"),
+        QStringLiteral("确定删除电站「%1」吗？\n\n"
+                       "存在未完成订单、使用中电桩或历史订单的电站无法删除。").arg(name),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (ret != QMessageBox::Yes) {
+        return;
+    }
+
+    QJsonObject params;
+    params[QStringLiteral("station_id")] = stationId;
+    const QJsonObject resp = m_api->call(QStringLiteral("station.delete"), params);
+    if (resp.value(QStringLiteral("ok")).toBool()) {
+        QMessageBox::information(this, QStringLiteral("成功"), QStringLiteral("电站已删除"));
+        reloadStationList();
+        loadStationCombo();
+    } else {
+        const QString errMsg = resp.value(QStringLiteral("error")).toObject()
+                                   .value(QStringLiteral("message")).toString(
+                                       QStringLiteral("删除失败"));
+        QMessageBox::warning(this, QStringLiteral("失败"), errMsg);
+    }
+}
+
+void MainWindow::reloadOperationLogList()
+{
+    ui->tableLog->setRowCount(0);
+
+    QJsonObject params;
+    params[QStringLiteral("limit")] = 200;
+    params[QStringLiteral("date_from")] = ui->dateLogFrom->date().toString(QStringLiteral("yyyy-MM-dd"));
+    params[QStringLiteral("date_to")] = ui->dateLogTo->date().toString(QStringLiteral("yyyy-MM-dd"));
+
+    const QString actionText = ui->comboLogAction->currentText();
+    if (actionText != QStringLiteral("全部操作")) {
+        params[QStringLiteral("action")] = actionText;
+    }
+
+    const QJsonObject resp = m_api->call(QStringLiteral("operation_log.list"), params);
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        const QString errMsg = resp.value(QStringLiteral("error")).toObject()
+                                   .value(QStringLiteral("message")).toString(
+                                       QStringLiteral("获取操作日志失败"));
+        QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        return;
+    }
+
+    const QJsonArray items = resp.value(QStringLiteral("data")).toObject().value(QStringLiteral("items")).toArray();
+    for (const QJsonValue &value : items) {
+        addOperationLogRow(value.toObject());
+    }
+}
+
+void MainWindow::addOperationLogRow(const QJsonObject &obj)
+{
+    const int row = ui->tableLog->rowCount();
+    ui->tableLog->insertRow(row);
+
+    auto mkReadOnly = [](const QString &text) {
+        auto *item = new QTableWidgetItem(text);
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        return item;
+    };
+
+    ui->tableLog->setItem(row, 0, mkReadOnly(obj.value(QStringLiteral("created_at")).toString()));
+    ui->tableLog->setItem(row, 1, mkReadOnly(obj.value(QStringLiteral("admin_username")).toString()));
+    ui->tableLog->setItem(row, 2, mkReadOnly(obj.value(QStringLiteral("action")).toString()));
+    ui->tableLog->setItem(row, 3, mkReadOnly(obj.value(QStringLiteral("target_type")).toString()));
+    ui->tableLog->setItem(row, 4, mkReadOnly(obj.value(QStringLiteral("target_id")).toString()));
+    ui->tableLog->setItem(row, 5, mkReadOnly(obj.value(QStringLiteral("detail")).toString()));
 }
 

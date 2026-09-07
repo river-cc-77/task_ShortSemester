@@ -27,6 +27,9 @@ public:
 
     // 新增电桩
     static QJsonObject pileCreate(const QString &id, const QString &token, const QJsonObject &data);
+
+    // 操作日志列表
+    static QJsonObject operationLogList(const QString &id, const QString &token, const QJsonObject &data);
 };
 
 #endif // ADMINHANDLER_H

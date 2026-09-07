@@ -130,6 +130,12 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
     if (cmd == "station.create") {
         return StationHandler::create(id, token, data);
     }
+    if (cmd == "station.update") {
+        return StationHandler::update(id, token, data);
+    }
+    if (cmd == "station.delete") {
+        return StationHandler::remove(id, token, data);
+    }
     if (cmd == "station.favorite.add") {
         return StationHandler::favoriteAdd(id, token, data);
     }
@@ -187,6 +193,9 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
     }
     if (cmd == "pile.create") {
         return AdminHandler::pileCreate(id, token, data);
+    }
+    if (cmd == "operation_log.list") {
+        return AdminHandler::operationLogList(id, token, data);
     }
 
     // ===== 统计 =====
