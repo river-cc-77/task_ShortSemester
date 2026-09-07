@@ -351,6 +351,23 @@ def test_admin_freeze_roundtrip(host: str, port: int, admin_token: str) -> None:
     )
 
 
+def test_freeze_blocked_with_pending_order(host: str, port: int, admin_token: str) -> None:
+    print("\n========== C2. 待支付订单时禁止冻结 ==========")
+    user_id = db_query_scalar(db_path(), "SELECT id FROM user WHERE phone = ?", ("13800138002",))
+    run_test(
+        host,
+        port,
+        {
+            "id": "C5",
+            "cmd": "user.freeze",
+            "token": admin_token,
+            "data": {"user_id": user_id, "freeze": True},
+        },
+        "user.freeze 8002 with 待支付 order",
+        expect_ok=False,
+    )
+
+
 def test_tx_reserve_consistency(host: str, port: int, token: str, admin_token: str) -> None:
     print("\n========== D. 事务：reserve 订单与桩状态一致 ==========")
     db = db_path()
@@ -653,6 +670,18 @@ def test_admin_pile_page_api(host: str, port: int, token: str, admin_token: str)
             "data": {"pile_no": pile_no, "power_kw": 9.5},
         },
         f"pile.update {pile_no} power",
+    )
+    run_test_error(
+        host,
+        port,
+        {
+            "id": "H5b",
+            "cmd": "pile.update",
+            "token": admin_token,
+            "data": {"pile_no": pile_no, "status": "预约"},
+        },
+        "pile.update manual 预约 rejected",
+        "INVALID_PARAM",
     )
     power_after = db_query_scalar(db, "SELECT power_kw FROM pile WHERE pile_no = ?", (pile_no,))
     if abs(power_after - 9.5) > 0.01:
@@ -1081,6 +1110,7 @@ def main() -> int:
     test_admin_dashboard_api(host, port, admin_token)
     test_admin_user_list_api(host, port, admin_token)
     test_admin_freeze_roundtrip(host, port, admin_token)
+    test_freeze_blocked_with_pending_order(host, port, admin_token)
     test_admin_pile_page_api(host, port, token, admin_token)
     test_admin_pile_detail_and_create(host, port, token, admin_token)
     test_admin_order_page_api(host, port, admin_token)

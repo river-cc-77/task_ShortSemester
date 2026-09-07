@@ -252,8 +252,11 @@ QPushButton:hover{
     ui->comboOrderStatus->addItem(QStringLiteral("已完成"));
     ui->dateOrderFrom->setCalendarPopup(true);
     ui->dateOrderTo->setCalendarPopup(true);
-    ui->dateOrderFrom->setDate(QDate(2026, 8, 1));
-    ui->dateOrderTo->setDate(QDate(2026, 9, 30));
+    {
+        const QDate today = QDate::currentDate();
+        ui->dateOrderFrom->setDate(today.addMonths(-2));
+        ui->dateOrderTo->setDate(today.addMonths(1));
+    }
 
     ui->tableOrder->setColumnCount(9);
     ui->tableOrder->setHorizontalHeaderLabels({
@@ -321,8 +324,11 @@ QPushButton:hover{
     ui->comboLogAction->addItem(QStringLiteral("代结算"));
     ui->dateLogFrom->setCalendarPopup(true);
     ui->dateLogTo->setCalendarPopup(true);
-    ui->dateLogFrom->setDate(QDate(2026, 8, 1));
-    ui->dateLogTo->setDate(QDate(2026, 9, 30));
+    {
+        const QDate today = QDate::currentDate();
+        ui->dateLogFrom->setDate(today.addMonths(-2));
+        ui->dateLogTo->setDate(today.addMonths(1));
+    }
 
     ui->tableLog->setColumnCount(6);
     ui->tableLog->setHorizontalHeaderLabels({
@@ -462,18 +468,19 @@ void MainWindow::addUserRow(const QJsonObject &userObj)
     int row = ui->tableUser->rowCount();
     ui->tableUser->insertRow(row);
     int uid = userObj["user_id"].toInt();
-    auto *itemId = new QTableWidgetItem(QString::number(uid));
-    itemId->setFlags(itemId->flags() & ~Qt::ItemIsEditable);
-    ui->tableUser->setItem(row,0,itemId);
-    auto *itemPhone = new QTableWidgetItem(userObj["phone"].toString());
-    itemPhone->setFlags(itemPhone->flags() & ~Qt::ItemIsEditable);
-    ui->tableUser->setItem(row,1,itemPhone);
-    ui->tableUser->setItem(row,2, new QTableWidgetItem(userObj["nickname"].toString()));
-    ui->tableUser->setItem(row,3, new QTableWidgetItem(QString::number(userObj["balance"].toDouble())));
-    ui->tableUser->setItem(row,4, new QTableWidgetItem(userObj["created_at"].toString()));
+    auto mkReadOnly = [](const QString &text) {
+        auto *item = new QTableWidgetItem(text);
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        return item;
+    };
+    ui->tableUser->setItem(row, 0, mkReadOnly(QString::number(uid)));
+    ui->tableUser->setItem(row, 1, mkReadOnly(userObj["phone"].toString()));
+    ui->tableUser->setItem(row, 2, mkReadOnly(userObj["nickname"].toString()));
+    ui->tableUser->setItem(row, 3, mkReadOnly(QString::number(userObj["balance"].toDouble())));
+    ui->tableUser->setItem(row, 4, mkReadOnly(userObj["created_at"].toString()));
     QString statusText = userObj["status"].toString();
     bool isFrozen = (statusText == QStringLiteral("冻结"));
-    ui->tableUser->setItem(row,5, new QTableWidgetItem(statusText));
+    ui->tableUser->setItem(row, 5, mkReadOnly(statusText));
     QWidget *btnContainer = new QWidget();
     QHBoxLayout *btnLayout = new QHBoxLayout(btnContainer);
     btnLayout->setContentsMargins(4,2,4,2);
@@ -581,14 +588,22 @@ void MainWindow::addPileRow(const QJsonObject &obj)
     qDebug()<<"单条桩数据:"<<obj;
     int row = ui->tableWidgetPile->rowCount();
     ui->tableWidgetPile->insertRow(row);
-    QString pileNo = obj["pile_no"].toString();
-    ui->tableWidgetPile->setItem(row,0, new QTableWidgetItem(pileNo));
-    ui->tableWidgetPile->setItem(row,1, new QTableWidgetItem(obj["station_name"].toString()));
-    ui->tableWidgetPile->setItem(row,2, new QTableWidgetItem(obj["type"].toString()));
-    ui->tableWidgetPile->setItem(row,3, new QTableWidgetItem(QString::number(obj["power_kw"].toDouble(), 'f', 1)));
-    ui->tableWidgetPile->setItem(row,4, new QTableWidgetItem(obj["status"].toString()));
-    ui->tableWidgetPile->setItem(row,5, new QTableWidgetItem(QString::number(obj["charge_count"].toInt())));
-    ui->tableWidgetPile->setItem(row,6, new QTableWidgetItem(QString::number(obj["charge_minutes"].toInt())));
+    const QString pileNo = obj["pile_no"].toString();
+    const QString pileStatus = obj["status"].toString();
+
+    auto mkReadOnly = [](const QString &text) {
+        auto *item = new QTableWidgetItem(text);
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        return item;
+    };
+
+    ui->tableWidgetPile->setItem(row, 0, mkReadOnly(pileNo));
+    ui->tableWidgetPile->setItem(row, 1, mkReadOnly(obj["station_name"].toString()));
+    ui->tableWidgetPile->setItem(row, 2, mkReadOnly(obj["type"].toString()));
+    ui->tableWidgetPile->setItem(row, 3, mkReadOnly(QString::number(obj["power_kw"].toDouble(), 'f', 1)));
+    ui->tableWidgetPile->setItem(row, 4, mkReadOnly(pileStatus));
+    ui->tableWidgetPile->setItem(row, 5, mkReadOnly(QString::number(obj["charge_count"].toInt())));
+    ui->tableWidgetPile->setItem(row, 6, mkReadOnly(QString::number(obj["charge_minutes"].toInt())));
 
     QWidget *container = new QWidget();
     QHBoxLayout *hlay = new QHBoxLayout(container);
@@ -597,7 +612,9 @@ void MainWindow::addPileRow(const QJsonObject &obj)
     QPushButton *btnRestart = new QPushButton("重启");
     QPushButton *btnDel = new QPushButton("删除");
     hlay->addWidget(btnEdit);
-    hlay->addWidget(btnRestart);
+    if (pileStatus == QStringLiteral("闲置") || pileStatus == QStringLiteral("故障")) {
+        hlay->addWidget(btnRestart);
+    }
     hlay->addWidget(btnDel);
     ui->tableWidgetPile->setCellWidget(row,7, container);
 

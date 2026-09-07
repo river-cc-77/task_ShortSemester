@@ -186,7 +186,7 @@ QJsonObject UserHandler::freeze(const QString &id, const QString &token, const Q
     }
     const bool freeze = data.value("freeze").toBool(false);
 
-    // 需求 NO.18/30：充电中被冻结须先停止并完成结算 → 冻结时拦截充电中订单
+    // 存在任意未完成订单时禁止冻结（含待支付，避免冻结后用户无法自助结算）
     if (freeze) {
         const auto openOrder = DbManager::instance().findOpenOrder(userId);
         if (openOrder.has_value()) {
@@ -194,6 +194,8 @@ QJsonObject UserHandler::freeze(const QString &id, const QString &token, const Q
             if (orderStatus == QStringLiteral("充电中")) {
                 return Protocol::makeError(id, "INVALID_PARAM", "用户充电中，请先停止并完成结算");
             }
+            return Protocol::makeError(id, "INVALID_PARAM",
+                                     "用户存在未完成订单，请先代结算或待用户处理后再冻结");
         }
     }
 

@@ -8,13 +8,6 @@ PileEditDialog::PileEditDialog(QWidget *parent) :
     ui->setupUi(this);
     ui->spinPower->setRange(0.01, 500.0);
     ui->spinPower->setDecimals(2);
-    ui->cboxStatus->clear();
-    ui->cboxStatus->addItems({
-        QStringLiteral("闲置"),
-        QStringLiteral("预约"),
-        QStringLiteral("在用"),
-        QStringLiteral("故障"),
-    });
     connect(ui->btnOk, &QPushButton::clicked, this, &QDialog::accept);
     connect(ui->btnCancel, &QPushButton::clicked, this, &QDialog::reject);
 }
@@ -34,10 +27,23 @@ void PileEditDialog::setData(const QString &pileNo, const QString &type, double 
     ui->lblPileNoValue->setText(pileNo);
     ui->cboxType->setCurrentText(type);
     ui->spinPower->setValue(powerKw);
-    ui->cboxStatus->setCurrentText(status);
 
+    ui->cboxStatus->clear();
     const bool inUse = (status == QStringLiteral("预约") || status == QStringLiteral("在用"));
-    ui->cboxStatus->setEnabled(!inUse);
+    if (inUse) {
+        ui->cboxStatus->addItem(status);
+        ui->cboxStatus->setCurrentIndex(0);
+        ui->cboxStatus->setEnabled(false);
+    } else {
+        ui->cboxStatus->addItems({
+            QStringLiteral("闲置"),
+            QStringLiteral("故障"),
+        });
+        ui->cboxStatus->setCurrentText(status == QStringLiteral("故障")
+                                           ? QStringLiteral("故障")
+                                           : QStringLiteral("闲置"));
+        ui->cboxStatus->setEnabled(true);
+    }
 }
 
 QJsonObject PileEditDialog::getUpdateParams()

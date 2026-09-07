@@ -718,10 +718,22 @@ bool DbManager::updatePile(const QString &pileNo, const QString &type,
 
 bool DbManager::deletePile(const QString &pileNo)
 {
+    const auto pileOpt = findPileByNo(pileNo);
+    if (!pileOpt.has_value()) {
+        return false;
+    }
+    const QString pileStatus = pileOpt->value(QStringLiteral("status")).toString();
+    if (pileStatus == QStringLiteral("预约") || pileStatus == QStringLiteral("在用")) {
+        return false;
+    }
+    if (pileHasOpenOrders(pileNo) || pileHasAnyOrders(pileNo)) {
+        return false;
+    }
+
     QSqlQuery query(m_db);
     query.prepare("DELETE FROM pile WHERE pile_no = :no");
     query.bindValue(":no", pileNo);
-    return query.exec();
+    return query.exec() && query.numRowsAffected() > 0;
 }
 
 bool DbManager::pileNoExists(const QString &pileNo)
@@ -1147,6 +1159,16 @@ std::optional<QString> DbManager::reservePile(int userId, int stationId, int pil
 {
     std::optional<QString> orderNo;
     const bool ok = runInTransaction([&]() {
+        QSqlQuery userOpenQuery(m_db);
+        userOpenQuery.prepare(
+            "SELECT COUNT(*) FROM charge_order "
+            "WHERE user_id = :uid AND status IN ('预约', '充电中', '待支付')");
+        userOpenQuery.bindValue(":uid", userId);
+        if (!userOpenQuery.exec() || !userOpenQuery.next()
+            || userOpenQuery.value(0).toInt() > 0) {
+            return false;
+        }
+
         QSqlQuery openQuery(m_db);
         openQuery.prepare(
             "SELECT COUNT(*) FROM charge_order "
@@ -1225,7 +1247,7 @@ bool DbManager::stopCharge(const QString &orderNo, int pileId, const QString &en
             qWarning() << "stopCharge update order failed:" << orderQuery.lastError().text();
             return false;
         }
-        return updatePileStatus(pileId, QStringLiteral("闲置"));
+        return updatePileStatus(pileId, QStringLiteral("闲置"), QStringLiteral("在用"));
     });
 }
 
@@ -1254,7 +1276,7 @@ void DbManager::cancelExpiredReservations()
                 qWarning() << "cancelExpiredReservations delete failed:" << del.lastError().text();
                 return false;
             }
-            return updatePileStatus(pileId, QStringLiteral("闲置"));
+            return updatePileStatus(pileId, QStringLiteral("闲置"), QStringLiteral("预约"));
         });
         if (ok) {
             qInfo() << "预约超时自动取消:" << orderNo;

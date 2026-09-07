@@ -164,9 +164,14 @@ QJsonObject AdminHandler::pileUpdate(const QString &id, const QString &token, co
     if (type.isEmpty() && powerKw == -1 && status.isEmpty()) {
         return Protocol::makeError(id, "INVALID_PARAM", "至少提供一个要修改的字段");
     }
-    if ((!type.isEmpty() || powerKw != -1)
-        && DbManager::instance().pileHasActiveOrders(pileNo)) {
-        return Protocol::makeError(id, "INVALID_PARAM", "该电桩使用中，无法修改类型或功率");
+    if (!status.isEmpty()
+        && (status == QStringLiteral("预约") || status == QStringLiteral("在用"))) {
+        return Protocol::makeError(id, "INVALID_PARAM",
+                                   "预约/在用状态由订单流程驱动，不可手动设置");
+    }
+    if ((!type.isEmpty() || powerKw != -1 || !status.isEmpty())
+        && DbManager::instance().pileHasOpenOrders(pileNo)) {
+        return Protocol::makeError(id, "INVALID_PARAM", "该电桩存在未完成订单，无法修改");
     }
     if (!status.isEmpty() && DbManager::instance().pileHasActiveOrders(pileNo)) {
         return Protocol::makeError(id, "INVALID_PARAM", "该电桩使用中，无法修改状态");
