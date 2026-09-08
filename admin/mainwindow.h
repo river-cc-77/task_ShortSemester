@@ -12,7 +12,7 @@ class QPushButton;
 #include "orderdetaildialog.h"
 #include "stationeditdialog.h"
 #include "stationdetaildialog.h"
-#include "announcementmanagedialog.h"
+#include "announcementeditdialog.h"
 class ApiClient;
 namespace Ui {
 class MainWindow;
@@ -59,6 +59,12 @@ private slots:
     void reloadOperationLogList();
     void addOperationLogRow(const QJsonObject &obj);
 
+    void reloadAnnouncementList();
+    void addAnnouncementRow(const QJsonObject &obj);
+    void onAddAnnouncementClicked();
+    void onEditAnnouncementClicked(const QJsonObject &announcement);
+    void onDeleteAnnouncementClicked(const QJsonObject &announcement);
+
     // 电桩编辑弹窗槽函数
     void onEditPileBtnClicked(const QString& pileNo);
 
@@ -68,7 +74,6 @@ private:
     bool m_refreshBusy = false;
     QJsonArray m_stationItems;
     QMap<int, int> m_forecastMinIdle;
-    QPushButton *m_btnAnnouncement = nullptr;
     void resetAllBtnSelect();
     void refreshBtnStyle(QPushButton *btn);
     void drawRevenueChartFromJson(const QJsonArray& trendArr);

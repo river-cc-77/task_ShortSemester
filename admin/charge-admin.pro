@@ -15,7 +15,6 @@ SOURCES += \
     stationeditdialog.cpp \
     stationdetaildialog.cpp \
     announcementeditdialog.cpp \
-    announcementmanagedialog.cpp \
     qcustomplot.cpp
 HEADERS += \
     apiclient.h \
@@ -28,7 +27,6 @@ HEADERS += \
     stationeditdialog.h \
     stationdetaildialog.h \
     announcementeditdialog.h \
-    announcementmanagedialog.h \
     qcustomplot.h
 FORMS += \
     mainwindow.ui \

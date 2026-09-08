@@ -1,7 +1,7 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "apiclient.h"
-#include "announcementmanagedialog.h"
+#include "announcementeditdialog.h"
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QMessageBox>
@@ -100,8 +100,8 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     // ========= 内容区工具条卡片化（样式见 theme.qss） =========
     const QList<QWidget *> toolbarCards = {
         ui->widget_4, ui->widget_6, ui->widget_stationFilter, ui->widget,
-        ui->widget_logFilter, ui->widget_orderFilter, ui->widget_2,
-        ui->widget_top_bar, ui->widget_chart
+        ui->widget_logFilter, ui->widget_orderFilter, ui->widget_announcementFilter,
+        ui->widget_2, ui->widget_top_bar, ui->widget_chart
     };
     for (QWidget *w : toolbarCards) {
         w->setAttribute(Qt::WA_StyledBackground, true);
@@ -126,6 +126,8 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     markBtn(ui->btnLogQuery, "primary");
     markBtn(ui->btnOrderQuery, "primary");
     markBtn(ui->btnBackHome, "primary");
+    markBtn(ui->btnAnnouncementAdd, "primary");
+    markBtn(ui->btnAnnouncementRefresh, "primary");
     ui->btnGoPileStatus->setCursor(Qt::PointingHandCursor);
     ui->btnShift->setCursor(Qt::PointingHandCursor);
     ui->btnSearch->setText(QStringLiteral("查询"));
@@ -173,19 +175,11 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
         refreshBtnStyle(ui->btnLog);
         ui->stackedWidget->setCurrentIndex(4);
     });
-
-    m_btnAnnouncement = new QPushButton(QStringLiteral("公告管理"), ui->sideBarWidget);
-    m_btnAnnouncement->setSizePolicy(ui->btnLog->sizePolicy());
-    m_btnAnnouncement->setCursor(Qt::PointingHandCursor);
-    const int logIndex = ui->verticalLayout->indexOf(ui->btnLog);
-    if (logIndex >= 0) {
-        ui->verticalLayout->insertWidget(logIndex, m_btnAnnouncement);
-    } else {
-        ui->verticalLayout->addWidget(m_btnAnnouncement);
-    }
-    connect(m_btnAnnouncement, &QPushButton::clicked, this, [this]() {
-        AnnouncementManageDialog dlg(m_api, this);
-        dlg.exec();
+    connect(ui->btnAnnouncement, &QPushButton::clicked, this, [=]() {
+        resetAllBtnSelect();
+        ui->btnAnnouncement->setProperty("selected", true);
+        refreshBtnStyle(ui->btnAnnouncement);
+        ui->stackedWidget->setCurrentIndex(7);
     });
 
     // ========= 营收趋势页面 index=5 =========
@@ -292,6 +286,10 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
         else if(index == 4)
         {
             reloadOperationLogList();
+        }
+        else if(index == 7)
+        {
+            reloadAnnouncementList();
         }
     });
 
@@ -461,6 +459,24 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
         reloadOperationLogList();
     });
 
+    //==================== 公告管理初始化 ====================
+    ui->tableAnnouncement->setColumnCount(5);
+    ui->tableAnnouncement->setHorizontalHeaderLabels({
+        QStringLiteral("ID"),
+        QStringLiteral("标题"),
+        QStringLiteral("状态"),
+        QStringLiteral("发布时间"),
+        QStringLiteral("操作"),
+    });
+    ui->tableAnnouncement->verticalHeader()->setVisible(false);
+    ui->tableAnnouncement->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    configureTable(ui->tableAnnouncement, {1}, {0, 2, 3}, 4, 180);
+    ui->tableAnnouncement->verticalHeader()->setDefaultSectionSize(44);
+    ui->tableAnnouncement->setAlternatingRowColors(true);
+
+    connect(ui->btnAnnouncementAdd, &QPushButton::clicked, this, &MainWindow::onAddAnnouncementClicked);
+    connect(ui->btnAnnouncementRefresh, &QPushButton::clicked, this, &MainWindow::reloadAnnouncementList);
+
 }
 
 MainWindow::~MainWindow()
@@ -471,7 +487,7 @@ MainWindow::~MainWindow()
 void MainWindow::resetAllBtnSelect()
 {
     auto btns = {ui->btnOverview, ui->btnPile, ui->btnStation, ui->btnUser,
-                 ui->btnOrder, ui->btnLog, ui->btnChart};
+                 ui->btnOrder, ui->btnAnnouncement, ui->btnLog, ui->btnChart};
     for(auto btn : btns)
     {
         btn->setProperty("selected", false);
@@ -1575,5 +1591,119 @@ void MainWindow::addOperationLogRow(const QJsonObject &obj)
     ui->tableLog->setItem(row, 3, mkReadOnly(obj.value(QStringLiteral("target_type")).toString()));
     ui->tableLog->setItem(row, 4, mkReadOnly(obj.value(QStringLiteral("target_id")).toString()));
     ui->tableLog->setItem(row, 5, mkReadOnly(obj.value(QStringLiteral("detail")).toString()));
+}
+
+void MainWindow::reloadAnnouncementList()
+{
+    ui->tableAnnouncement->setRowCount(0);
+    const QJsonObject resp = m_api->call(QStringLiteral("announcement.admin.list"));
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        const QString errMsg = resp.value(QStringLiteral("error")).toObject()
+                                   .value(QStringLiteral("message")).toString(
+                                       QStringLiteral("获取公告列表失败"));
+        QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        return;
+    }
+
+    const QJsonArray items = resp.value(QStringLiteral("data")).toObject()
+                                 .value(QStringLiteral("items")).toArray();
+    for (const QJsonValue &value : items) {
+        addAnnouncementRow(value.toObject());
+    }
+}
+
+void MainWindow::addAnnouncementRow(const QJsonObject &obj)
+{
+    const int row = ui->tableAnnouncement->rowCount();
+    ui->tableAnnouncement->insertRow(row);
+
+    auto mkReadOnly = [](const QString &text) {
+        auto *item = new QTableWidgetItem(text);
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        return item;
+    };
+
+    ui->tableAnnouncement->setItem(row, 0, mkReadOnly(QString::number(obj.value(QStringLiteral("id")).toInt())));
+    ui->tableAnnouncement->setItem(row, 1, mkReadOnly(obj.value(QStringLiteral("title")).toString()));
+    const bool active = obj.value(QStringLiteral("is_active")).toInt() == 1;
+    ui->tableAnnouncement->setItem(row, 2, mkReadOnly(active ? QStringLiteral("启用")
+                                                               : QStringLiteral("停用")));
+    ui->tableAnnouncement->setItem(row, 3, mkReadOnly(obj.value(QStringLiteral("created_at")).toString()));
+
+    QPushButton *btnEdit = makeOpButton(QStringLiteral("编辑"), "primary", 56);
+    QPushButton *btnDelete = makeOpButton(QStringLiteral("删除"), "danger", 56);
+    ui->tableAnnouncement->setCellWidget(row, 4, makeOpCell({btnEdit, btnDelete}));
+
+    connect(btnEdit, &QPushButton::clicked, this, [this, obj]() {
+        onEditAnnouncementClicked(obj);
+    });
+    connect(btnDelete, &QPushButton::clicked, this, [this, obj]() {
+        onDeleteAnnouncementClicked(obj);
+    });
+}
+
+void MainWindow::onAddAnnouncementClicked()
+{
+    AnnouncementEditDialog dlg(this);
+    dlg.setCreateMode();
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QJsonObject resp = m_api->call(QStringLiteral("announcement.create"), dlg.getParams());
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        const QString errMsg = resp.value(QStringLiteral("error")).toObject()
+                                   .value(QStringLiteral("message")).toString(
+                                       QStringLiteral("新增失败"));
+        QMessageBox::warning(this, QStringLiteral("失败"), errMsg);
+        return;
+    }
+    reloadAnnouncementList();
+}
+
+void MainWindow::onEditAnnouncementClicked(const QJsonObject &announcement)
+{
+    AnnouncementEditDialog dlg(this);
+    dlg.setEditMode(announcement);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QJsonObject resp = m_api->call(QStringLiteral("announcement.update"), dlg.getParams());
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        const QString errMsg = resp.value(QStringLiteral("error")).toObject()
+                                   .value(QStringLiteral("message")).toString(
+                                       QStringLiteral("更新失败"));
+        QMessageBox::warning(this, QStringLiteral("失败"), errMsg);
+        return;
+    }
+    reloadAnnouncementList();
+}
+
+void MainWindow::onDeleteAnnouncementClicked(const QJsonObject &announcement)
+{
+    const int annId = announcement.value(QStringLiteral("id")).toInt();
+    const QString title = announcement.value(QStringLiteral("title")).toString();
+    const auto ret = QMessageBox::question(
+        this,
+        QStringLiteral("删除确认"),
+        QStringLiteral("确定删除公告「%1」吗？").arg(title),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (ret != QMessageBox::Yes) {
+        return;
+    }
+
+    QJsonObject params;
+    params[QStringLiteral("id")] = annId;
+    const QJsonObject resp = m_api->call(QStringLiteral("announcement.delete"), params);
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        const QString errMsg = resp.value(QStringLiteral("error")).toObject()
+                                   .value(QStringLiteral("message")).toString(
+                                       QStringLiteral("删除失败"));
+        QMessageBox::warning(this, QStringLiteral("失败"), errMsg);
+        return;
+    }
+    reloadAnnouncementList();
 }
 
