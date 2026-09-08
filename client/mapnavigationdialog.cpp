@@ -34,6 +34,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QWebEngineProfile>
+#include <QWebEngineSettings>
 #include <QWebEngineView>
 #endif
 
@@ -212,34 +213,30 @@ bool ensureWebEngineProcessPath()
 }
 
 QString buildBaiduJsMapHtml(const QString &ak,
-                            double originLat, double originLng,
-                            double destLat, double destLng,
                             const QString &originName, const QString &destName,
                             const QString &pathJson)
 {
-    Q_UNUSED(originLat);
-    Q_UNUSED(originLng);
-    Q_UNUSED(destLat);
-    Q_UNUSED(destLng);
     return QStringLiteral(
                R"(<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<style>html,body,#map{margin:0;padding:0;width:100%;height:100%;background:#edf2f9;}</style>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body,#map{margin:0;padding:0;width:100%;height:100%;background:#edf2f9;touch-action:none;}</style>
 <script src="https://api.map.baidu.com/api?v=3.0&ak=%1"></script>
-<script src="https://api.map.baidu.com/library/Convertor/1.2/src/Convertor_min.js"></script>
 </head><body><div id="map"></div>
 <script>
 var map = new BMap.Map('map');
 map.enableScrollWheelZoom(true);
+map.enableDragging(true);
+map.enableDoubleClickZoom(true);
+map.enableInertialDragging(true);
 map.addControl(new BMap.NavigationControl({anchor: BMAP_ANCHOR_TOP_LEFT, type: BMAP_NAVIGATION_CONTROL_SMALL}));
-var gcjPath = %2;
+var routePath = %2;
 function drawOnMap(bdPts) {
   map.clearOverlays();
-  if (!bdPts || bdPts.length === 0) return;
+  if (!bdPts || bdPts.length < 2) return;
   var polyline = new BMap.Polyline(bdPts, {
-    strokeColor: '#2B6BFF', strokeWeight: 5, strokeOpacity: 0.9
+    strokeColor: '#2B6BFF', strokeWeight: 6, strokeOpacity: 0.95
   });
   map.addOverlay(polyline);
   var mk1 = new BMap.Marker(bdPts[0]);
@@ -248,26 +245,10 @@ function drawOnMap(bdPts) {
   map.addOverlay(mk2);
   mk1.setLabel(new BMap.Label('%3', {offset: new BMap.Size(16, -10)}));
   mk2.setLabel(new BMap.Label('%4', {offset: new BMap.Size(16, -10)}));
-  map.setViewport(bdPts);
+  map.setViewport(bdPts, {margins: [30, 30, 30, 30]});
 }
-var gcjPts = gcjPath.map(function(p) { return new BMap.Point(p[0], p[1]); });
-var convertor = new BMap.Convertor();
-function translateAll(points, done) {
-  if (!points.length) { done([]); return; }
-  var out = [], idx = 0, batchSize = 10;
-  function next() {
-    if (idx >= points.length) { done(out); return; }
-    var batch = points.slice(idx, idx + batchSize);
-    idx += batchSize;
-    convertor.translate(batch, 3, 5, function(data) {
-      if (data.status === 0) out = out.concat(data.points);
-      else out = out.concat(batch);
-      next();
-    });
-  }
-  next();
-}
-translateAll(gcjPts, drawOnMap);
+var bdPts = routePath.map(function(p) { return new BMap.Point(p[0], p[1]); });
+drawOnMap(bdPts);
 </script></body></html>)")
         .arg(ak, pathJson, jsStringLiteral(originName), jsStringLiteral(destName));
 }
@@ -302,9 +283,8 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     if (ensureWebEngineProcessPath()) {
         m_webEngineReady = true;
         QWebEngineProfile::defaultProfile()->setHttpUserAgent(
-            QStringLiteral("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-                           "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 "
-                           "Mobile/15E148 Safari/604.1"));
+            QStringLiteral("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"));
     }
 #endif
 
@@ -432,6 +412,11 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     if (m_webEngineReady) {
         m_webView = new QWebEngineView(m_mapStack);
         m_webView->setObjectName(QStringLiteral("navWebMap"));
+        m_webView->setFocusPolicy(Qt::StrongFocus);
+        auto *settings = m_webView->settings();
+        settings->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
+        settings->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
+        settings->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled, true);
         m_mapStack->addWidget(m_webView);
     }
 #endif
@@ -484,6 +469,7 @@ QString MapNavigationDialog::directionLiteUrl(NavMode mode) const
                            .arg(m_destLat, 0, 'f', 6)
                            .arg(m_destLng, 0, 'f', 6));
     query.addQueryItem(QStringLiteral("coord_type"), QStringLiteral("gcj02"));
+    query.addQueryItem(QStringLiteral("ret_coordtype"), QStringLiteral("bd09ll"));
     query.addQueryItem(QStringLiteral("ak"), m_baiduAk);
     url.setQuery(query);
     return url.toString(QUrl::FullyEncoded);
@@ -582,6 +568,11 @@ void MapNavigationDialog::showNavigationResult(const QJsonObject &route)
 
     m_stack->setCurrentWidget(m_navPage);
     fitDialogInParent(this, parentWidget(), 820);
+#ifdef CHARGE_USE_WEBENGINE
+    if (m_webView) {
+        m_webView->setFocus(Qt::OtherFocusReason);
+    }
+#endif
 }
 
 #ifdef CHARGE_USE_WEBENGINE
@@ -594,11 +585,7 @@ void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps)
     const QString pathJson = buildPathJsonFromSteps(steps,
                                                     m_originLat, m_originLng,
                                                     m_destLat, m_destLng);
-    const QString html = buildBaiduJsMapHtml(m_baiduAk,
-                                             m_originLat, m_originLng,
-                                             m_destLat, m_destLng,
-                                             m_originDesc, m_destName,
-                                             pathJson);
+    const QString html = buildBaiduJsMapHtml(m_baiduAk, m_originDesc, m_destName, pathJson);
     m_webView->setHtml(html, QUrl(QStringLiteral("https://lbsyun.baidu.com/")));
 }
 #else
@@ -643,7 +630,7 @@ void MapNavigationDialog::loadStaticMap(const QJsonArray &steps)
     query.addQueryItem(QStringLiteral("height"), QStringLiteral("220"));
     query.addQueryItem(QStringLiteral("zoom"), QStringLiteral("13"));
     query.addQueryItem(QStringLiteral("paths"), pathsParam);
-    query.addQueryItem(QStringLiteral("coordtype"), QStringLiteral("gcj02"));
+    query.addQueryItem(QStringLiteral("coordtype"), QStringLiteral("bd09ll"));
     url.setQuery(query);
 
     QNetworkRequest request(url);
