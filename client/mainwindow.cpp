@@ -219,7 +219,7 @@ void MainWindow::showStationDetail(int stationId)
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("充电站电桩详情"));
-    dlg.resize(680, 520);
+    dlg.resize(372, 560);   // 限制在手机窗口(390 宽)内
 
     auto *lay = new QVBoxLayout(&dlg);
 
@@ -228,10 +228,12 @@ void MainWindow::showStationDetail(int stationId)
     const QString blackLabel = QStringLiteral(
             "color: #000000; font-size: 15px; font-weight: bold; padding: 4px 0px;");
     stationLabel->setStyleSheet(blackLabel);
+    stationLabel->setWordWrap(true);   // 窄屏下自动换行，避免文字被裁切
 
     // 电桩列表（可选中）
     auto *pileList = new QListWidget(&dlg);
     pileList->setStyleSheet(m_stationList->styleSheet());
+    pileList->setWordWrap(true);   // 电桩信息过长时换行显示
 
     // 按钮行
     auto *reserveBtn = new QPushButton(QStringLiteral("预约选中桩"), &dlg);
@@ -479,7 +481,7 @@ void MainWindow::onProfileCenter()
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("个人中心"));
-    dlg.resize(380, 420);
+    dlg.resize(372, 520);   // 限制在手机窗口(390 宽)内
 
     auto *lay = new QVBoxLayout(&dlg);
 
@@ -699,13 +701,14 @@ void MainWindow::onOrderHistory()
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("订单历史"));
-    dlg.resize(720, 500);
+    dlg.resize(372, 640);   // 限制在手机窗口(390 宽)内
 
     auto *lay = new QVBoxLayout(&dlg);
     auto *listWidget = new QListWidget(&dlg);
     auto *closeBtn = new QPushButton(QStringLiteral("关闭"), &dlg);
     closeBtn->setStyleSheet(m_refreshButton->styleSheet());
     listWidget->setStyleSheet(m_stationList->styleSheet());
+    listWidget->setWordWrap(true);   // 订单信息过长时换行显示
 
     lay->addWidget(listWidget);
     lay->addWidget(closeBtn);
@@ -763,7 +766,7 @@ void MainWindow::onOrderHistory()
         // 订单详情弹窗
         QDialog detailDlg(&dlg);
         detailDlg.setWindowTitle(QStringLiteral("订单详情"));
-        detailDlg.resize(420, 380);
+        detailDlg.resize(372, 460);   // 限制在手机窗口(390 宽)内
         auto *dLay = new QVBoxLayout(&detailDlg);
 
         auto *infoLabel = new QLabel(&detailDlg);
@@ -852,7 +855,7 @@ void MainWindow::onFavoriteList()
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("我的收藏"));
-    dlg.resize(620, 450);
+    dlg.resize(372, 560);   // 限制在手机窗口(390 宽)内
 
     auto *lay = new QVBoxLayout(&dlg);
     auto *listWidget = new QListWidget(&dlg);
@@ -861,6 +864,7 @@ void MainWindow::onFavoriteList()
     removeBtn->setStyleSheet(m_refreshButton->styleSheet());
     closeBtn->setStyleSheet(m_refreshButton->styleSheet());
     listWidget->setStyleSheet(m_stationList->styleSheet());
+    listWidget->setWordWrap(true);   // 收藏信息过长时换行显示
 
     auto *btnRow = new QHBoxLayout;
     btnRow->addWidget(removeBtn);
@@ -1019,7 +1023,7 @@ bool MainWindow::checkOpenOrder(bool failClosed)
     // 自定义弹窗（替代 QMessageBox，方便加跳转按钮）
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("提示"));
-    dlg.resize(380, 280);
+    dlg.resize(372, 340);   // 限制在手机窗口(390 宽)内
     auto *lay = new QVBoxLayout(&dlg);
     auto *label = new QLabel(&dlg);
     label->setWordWrap(true);
@@ -1105,7 +1109,7 @@ void MainWindow::showChargingProgress(const QString &orderNo)
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("充电中"));
-    dlg.resize(420, 360);
+    dlg.resize(372, 360);   // 限制在手机窗口(390 宽)内
     dlg.setModal(true);
 
     auto *lay = new QVBoxLayout(&dlg);
@@ -1238,7 +1242,7 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("订单结算"));
-    dlg.resize(400, 300);
+    dlg.resize(372, 340);   // 限制在手机窗口(390 宽)内
     dlg.setModal(true);
 
     auto *lay = new QVBoxLayout(&dlg);
