@@ -13,7 +13,16 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QResizeEvent>
 #include <QStackedWidget>
+#include <QStyledItemDelegate>
+#include <QTextDocument>
+#include <QAbstractTextDocumentLayout>
+#include <QAbstractItemView>
+#include <QPainter>
+#include <QPen>
+#include <QPalette>
+#include <QStyleOptionViewItem>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QVBoxLayout>
@@ -61,6 +70,123 @@ QString jsStringLiteral(const QString &text)
     return escaped;
 }
 
+QString stripHtmlTags(const QString &html)
+{
+    QTextDocument doc;
+    doc.setHtml(html);
+    return doc.toPlainText().trimmed();
+}
+
+QString buildPathJsonFromSteps(const QJsonArray &steps,
+                               double originLat, double originLng,
+                               double destLat, double destLng)
+{
+    QStringList pairs;
+    for (const QJsonValue &value : steps) {
+        const QString path = value.toObject().value(QStringLiteral("path")).toString();
+        for (const QString &pt : path.split(QLatin1Char(';'))) {
+            const QString trimmed = pt.trimmed();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            const QStringList ll = trimmed.split(QLatin1Char(','));
+            if (ll.size() >= 2) {
+                pairs << QStringLiteral("[%1,%2]")
+                             .arg(ll.at(0).trimmed())
+                             .arg(ll.at(1).trimmed());
+            }
+        }
+    }
+    if (pairs.isEmpty()) {
+        pairs << QStringLiteral("[%1,%2]").arg(originLng, 0, 'f', 6).arg(originLat, 0, 'f', 6)
+              << QStringLiteral("[%1,%2]").arg(destLng, 0, 'f', 6).arg(destLat, 0, 'f', 6);
+    }
+    return QStringLiteral("[%1]").arg(pairs.join(QLatin1Char(',')));
+}
+
+constexpr int kStepTextLeft = 10;
+constexpr int kStepTextRight = 10;
+constexpr int kStepTextTop = 8;
+constexpr int kStepTextBottom = 10;
+constexpr int kStepScrollbarAllow = 8;
+
+class NavStepItemDelegate : public QStyledItemDelegate
+{
+public:
+    explicit NavStepItemDelegate(QObject *parent = nullptr)
+        : QStyledItemDelegate(parent) {}
+
+    QSize sizeHint(const QStyleOptionViewItem &option,
+                   const QModelIndex &index) const override
+    {
+        const auto *view = qobject_cast<const QAbstractItemView *>(parent());
+        int avail = (view ? view->viewport()->width() : 320)
+                    - kStepTextLeft - kStepTextRight - kStepScrollbarAllow;
+        avail = qMax(avail, 100);
+
+        QTextDocument doc;
+        doc.setDocumentMargin(0);
+        doc.setDefaultFont(option.font);
+        doc.setPlainText(index.data(Qt::DisplayRole).toString());
+        doc.setTextWidth(avail);
+        const int textH = static_cast<int>(doc.size().height() + 0.999);
+        return QSize(avail + kStepTextLeft + kStepTextRight,
+                     textH + kStepTextTop + kStepTextBottom);
+    }
+
+    void paint(QPainter *painter, const QStyleOptionViewItem &option,
+               const QModelIndex &index) const override
+    {
+        painter->save();
+        painter->setRenderHint(QPainter::TextAntialiasing, true);
+        const QRect r = option.rect;
+
+        const QRect textRect = r.adjusted(kStepTextLeft, kStepTextTop,
+                                          -kStepTextRight, -kStepTextBottom);
+        if (textRect.width() <= 0 || textRect.height() <= 0) {
+            painter->restore();
+            return;
+        }
+
+        QTextDocument doc;
+        doc.setDocumentMargin(0);
+        doc.setDefaultFont(option.font);
+        doc.setPlainText(index.data(Qt::DisplayRole).toString());
+        doc.setTextWidth(textRect.width());
+        painter->translate(textRect.topLeft());
+        QAbstractTextDocumentLayout::PaintContext ctx;
+        ctx.palette.setColor(QPalette::Text, QColor(QStringLiteral("#25324F")));
+        doc.documentLayout()->draw(painter, ctx);
+        painter->restore();
+
+        painter->save();
+        painter->setPen(QPen(QColor(QStringLiteral("#E6ECF5")), 1));
+        painter->drawLine(textRect.left(), r.bottom(), textRect.right(), r.bottom());
+        painter->restore();
+    }
+};
+
+class NavStepsListWidget : public QListWidget
+{
+public:
+    explicit NavStepsListWidget(QWidget *parent = nullptr)
+        : QListWidget(parent)
+    {
+        setWordWrap(true);
+        setTextElideMode(Qt::ElideNone);
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+        setItemDelegate(new NavStepItemDelegate(this));
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QListWidget::resizeEvent(event);
+        doItemsLayout();
+    }
+};
+
 #ifdef CHARGE_USE_WEBENGINE
 bool ensureWebEngineProcessPath()
 {
@@ -89,8 +215,12 @@ QString buildBaiduJsMapHtml(const QString &ak,
                             double originLat, double originLng,
                             double destLat, double destLng,
                             const QString &originName, const QString &destName,
-                            bool walking)
+                            const QString &pathJson)
 {
+    Q_UNUSED(originLat);
+    Q_UNUSED(originLng);
+    Q_UNUSED(destLat);
+    Q_UNUSED(destLng);
     return QStringLiteral(
                R"(<!DOCTYPE html>
 <html><head>
@@ -104,34 +234,42 @@ QString buildBaiduJsMapHtml(const QString &ak,
 var map = new BMap.Map('map');
 map.enableScrollWheelZoom(true);
 map.addControl(new BMap.NavigationControl({anchor: BMAP_ANCHOR_TOP_LEFT, type: BMAP_NAVIGATION_CONTROL_SMALL}));
-var gcj1 = new BMap.Point(%2, %3);
-var gcj2 = new BMap.Point(%4, %5);
-function drawRoute(p1, p2) {
+var gcjPath = %2;
+function drawOnMap(bdPts) {
   map.clearOverlays();
-  var mk1 = new BMap.Marker(p1);
-  var mk2 = new BMap.Marker(p2);
+  if (!bdPts || bdPts.length === 0) return;
+  var polyline = new BMap.Polyline(bdPts, {
+    strokeColor: '#2B6BFF', strokeWeight: 5, strokeOpacity: 0.9
+  });
+  map.addOverlay(polyline);
+  var mk1 = new BMap.Marker(bdPts[0]);
+  var mk2 = new BMap.Marker(bdPts[bdPts.length - 1]);
   map.addOverlay(mk1);
   map.addOverlay(mk2);
-  mk1.setLabel(new BMap.Label('%6', {offset:new BMap.Size(16,-10)}));
-  mk2.setLabel(new BMap.Label('%7', {offset:new BMap.Size(16,-10)}));
-  var opts = {renderOptions:{map:map,autoViewport:true,enableDragging:true}};
-  var route = %8 ? new BMap.WalkingRoute(map, opts) : new BMap.DrivingRoute(map, opts);
-  route.search(p1, p2);
+  mk1.setLabel(new BMap.Label('%3', {offset: new BMap.Size(16, -10)}));
+  mk2.setLabel(new BMap.Label('%4', {offset: new BMap.Size(16, -10)}));
+  map.setViewport(bdPts);
 }
+var gcjPts = gcjPath.map(function(p) { return new BMap.Point(p[0], p[1]); });
 var convertor = new BMap.Convertor();
-convertor.translate([gcj1, gcj2], 3, 5, function(data) {
-  if (data.status === 0) drawRoute(data.points[0], data.points[1]);
-  else drawRoute(gcj1, gcj2);
-});
+function translateAll(points, done) {
+  if (!points.length) { done([]); return; }
+  var out = [], idx = 0, batchSize = 10;
+  function next() {
+    if (idx >= points.length) { done(out); return; }
+    var batch = points.slice(idx, idx + batchSize);
+    idx += batchSize;
+    convertor.translate(batch, 3, 5, function(data) {
+      if (data.status === 0) out = out.concat(data.points);
+      else out = out.concat(batch);
+      next();
+    });
+  }
+  next();
+}
+translateAll(gcjPts, drawOnMap);
 </script></body></html>)")
-        .arg(ak)
-        .arg(originLng, 0, 'f', 6)
-        .arg(originLat, 0, 'f', 6)
-        .arg(destLng, 0, 'f', 6)
-        .arg(destLat, 0, 'f', 6)
-        .arg(jsStringLiteral(originName))
-        .arg(jsStringLiteral(destName))
-        .arg(walking ? QStringLiteral("true") : QStringLiteral("false"));
+        .arg(ak, pathJson, jsStringLiteral(originName), jsStringLiteral(destName));
 }
 #endif
 
@@ -304,9 +442,9 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     stepsTitle->setObjectName(QStringLiteral("sectionTitle"));
     navLay->addWidget(stepsTitle);
 
-    m_stepsList = new QListWidget(m_navPage);
+    m_stepsList = new NavStepsListWidget(m_navPage);
     m_stepsList->setObjectName(QStringLiteral("navStepsList"));
-    m_stepsList->setMaximumHeight(140);
+    m_stepsList->setMinimumHeight(120);
     navLay->addWidget(m_stepsList, 1);
 
     auto *backBtn = new QPushButton(QStringLiteral("返回"), m_navPage);
@@ -421,7 +559,7 @@ void MapNavigationDialog::showNavigationResult(const QJsonObject &route)
     int idx = 1;
     for (const QJsonValue &value : steps) {
         const QJsonObject step = value.toObject();
-        const QString instruction = step.value(QStringLiteral("instruction")).toString();
+        const QString instruction = stripHtmlTags(step.value(QStringLiteral("instruction")).toString());
         const int stepDist = step.value(QStringLiteral("distance")).toInt();
         m_stepsList->addItem(QStringLiteral("%1. %2（%3 米）")
                                  .arg(idx++)
@@ -432,7 +570,7 @@ void MapNavigationDialog::showNavigationResult(const QJsonObject &route)
 #ifdef CHARGE_USE_WEBENGINE
     if (m_webView) {
         m_mapStack->setCurrentWidget(m_webView);
-        loadInteractiveMap();
+        loadInteractiveMap(steps);
     } else
 #endif
     {
@@ -447,22 +585,27 @@ void MapNavigationDialog::showNavigationResult(const QJsonObject &route)
 }
 
 #ifdef CHARGE_USE_WEBENGINE
-void MapNavigationDialog::loadInteractiveMap()
+void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps)
 {
     if (!m_webView) {
         return;
     }
 
-    const bool walking = selectedMode() == NavMode::Walking;
+    const QString pathJson = buildPathJsonFromSteps(steps,
+                                                    m_originLat, m_originLng,
+                                                    m_destLat, m_destLng);
     const QString html = buildBaiduJsMapHtml(m_baiduAk,
                                              m_originLat, m_originLng,
                                              m_destLat, m_destLng,
                                              m_originDesc, m_destName,
-                                             walking);
+                                             pathJson);
     m_webView->setHtml(html, QUrl(QStringLiteral("https://lbsyun.baidu.com/")));
 }
 #else
-void MapNavigationDialog::loadInteractiveMap() {}
+void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps)
+{
+    Q_UNUSED(steps);
+}
 #endif
 
 void MapNavigationDialog::loadStaticMap(const QJsonArray &steps)

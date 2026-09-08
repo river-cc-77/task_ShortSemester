@@ -2,6 +2,7 @@
 #define MAPNAVIGATIONDIALOG_H
 
 #include <QDialog>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
 
@@ -39,7 +40,7 @@ private:
     void fetchRoute();
     void showNavigationResult(const QJsonObject &route);
     void loadStaticMap(const QJsonArray &steps);
-    void loadInteractiveMap();
+    void loadInteractiveMap(const QJsonArray &steps);
 
     QString m_originDesc;
     double m_originLat = 0;

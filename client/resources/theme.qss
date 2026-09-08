@@ -405,3 +405,8 @@ QListWidget#navStepsList {
     border-radius: 10px;
     padding: 4px;
 }
+
+QListWidget#navStepsList::item {
+    border: none;
+    padding: 0;
+}
