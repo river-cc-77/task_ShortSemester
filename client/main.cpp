@@ -13,6 +13,7 @@ int main(int argc, char *argv[])
 {
     setupInputMethodEnv();   // 必须在 QApplication 之前
     QApplication app(argc, argv);
+    logInputMethodStatus();
 
     // 统一字体（与 Admin 端一致）
     QFont baseFont(QStringLiteral("Microsoft YaHei UI"));

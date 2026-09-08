@@ -41,7 +41,9 @@ qmake6 charge-client.pro && make -j4
 ./charge-client
 ```
 
-Wayland 提示可忽略；若需强制 X11：`QT_QPA_PLATFORM=xcb ./charge-client`
+Wayland 提示可忽略。2026-03 起程序在 Wayland 下会自动使用 `xcb`（X11），输入法更稳定。
+
+启动后终端会打印一行 `[IME] ... plugin=ibus`（或 `fcitx`）。若显示 `compose` 或警告，见下方输入法章节。
 
 ## Linux 虚拟机中文输入法（地址栏无法切拼音）
 
@@ -66,21 +68,60 @@ im-config -l
 
 ### 第二步：按框架安装 Qt6 插件
 
-**ibus（多数 Ubuntu VM）：**
+**先判断：Ubuntu 桌面默认是 ibus，只有 `pgrep fcitx5` 有输出时才走 fcitx 分支。**  
+若 `apt` 报「无法定位软件包 fcitx5-frontend-qt6」，说明当前系统源里没有 fcitx 的 Qt6 插件（常见于 Ubuntu 20.04 或未启用 universe），**请直接用下面的 ibus 方案**，与浏览器一致。
+
+**ibus（推荐，Ubuntu 默认）：**
 
 ```bash
+sudo apt update
 sudo apt install -y ibus ibus-pinyin ibus-gtk ibus-gtk3
 im-config -n ibus
-# 注销重新登录
+# 注销重新登录后，设置 → 键盘 → 输入源 中添加「中文(拼音)」
 ```
 
-**fcitx5：**
+确认 Qt6 插件存在（应有一行输出）：
 
 ```bash
+ls /usr/lib/x86_64-linux-gnu/qt6/plugins/platforminputcontexts/libibusplatforminputcontextplugin.so
+```
+
+若无此文件，再装 Qt6 本体（插件随 `libqt6gui6` / `qt6-base-dev` 或 `ibus` 提供，视版本而定）：
+
+```bash
+sudo apt install -y qt6-base-dev ibus
+```
+
+**fcitx5 已在运行但装不了 `fcitx5-frontend-qt6`（Ubuntu 20.04 常见）：**
+
+fcitx5 支持 **ibus 兼容协议**，只需安装 ibus 的 Qt6 插件，程序会自动用 `QT_IM_MODULE=ibus` 接入 fcitx5：
+
+```bash
+sudo apt install -y ibus
+ls /usr/lib/x86_64-linux-gnu/qt6/plugins/platforminputcontexts/libibusplatforminputcontextplugin.so
+cd client && qmake6 charge-client.pro && make -j4 && ./charge-client
+# 终端应显示: [IME] ... plugin=ibus
+# 以及: fcitx5 已通过 ibus 兼容层接入
+```
+
+**fcitx5（Ubuntu 22.04+，有 fcitx5-frontend-qt6 时）：**
+
+```bash
+sudo apt update
+# 仅 Ubuntu 22.04+ 通常有此包；20.04 请改用 ibus
 sudo apt install -y fcitx5 fcitx5-chinese-addons fcitx5-frontend-qt6
 im-config -n fcitx5
 # 注销重新登录
 ```
+
+若仍提示找不到 `fcitx5-frontend-qt6`，可搜索替代包名：
+
+```bash
+apt-cache search fcitx5 | grep -i qt6
+lsb_release -a    # 查看 Ubuntu 版本
+```
+
+Ubuntu 20.04 及更早版本建议 **不要装 fcitx5**，改用 ibus + `im-config -n ibus`。
 
 ### 第三步：重新编译并启动
 
