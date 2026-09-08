@@ -10,8 +10,13 @@ StationDetailDialog::StationDetailDialog(QWidget *parent)
     , ui(new Ui::StationDetailDialog)
 {
     ui->setupUi(this);
+    setAttribute(Qt::WA_StyledBackground, true);
     setWindowTitle(QStringLiteral("电站详情"));
     resize(560, 480);
+
+    ui->btnViewPiles->setProperty("class", "primary");
+    ui->btnViewPiles->setCursor(Qt::PointingHandCursor);
+    ui->btnClose->setCursor(Qt::PointingHandCursor);
 
     ui->tablePiles->setColumnCount(4);
     ui->tablePiles->setHorizontalHeaderLabels({

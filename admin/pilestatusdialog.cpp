@@ -6,7 +6,9 @@ PileStatusDialog::PileStatusDialog(QWidget *parent)
     , ui(new Ui::PileStatusDialog)
 {
     ui->setupUi(this);
+    setAttribute(Qt::WA_StyledBackground, true);
     setWindowTitle(QStringLiteral("电桩状态详情"));
+    ui->btnClose->setCursor(Qt::PointingHandCursor);
     connect(ui->btnClose, &QPushButton::clicked, this, &QDialog::accept);
 }
 

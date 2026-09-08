@@ -3,10 +3,24 @@
 #include "apiclient.h"
 
 #include <QApplication>
+#include <QFile>
+#include <QFont>
 
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+
+    // 统一字体
+    QFont baseFont(QStringLiteral("Microsoft YaHei UI"));
+    baseFont.setPointSize(10);
+    app.setFont(baseFont);
+
+    // 全局主题（打包在资源中，随程序分发，无需外部文件）
+    QFile qss(QStringLiteral(":/theme.qss"));
+    if (qss.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        app.setStyleSheet(QString::fromUtf8(qss.readAll()));
+        qss.close();
+    }
 
     ApiClient api;
     LoginWindow login(&api);

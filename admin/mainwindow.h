@@ -65,6 +65,7 @@ private:
     bool m_refreshBusy = false;
     QJsonArray m_stationItems;
     void resetAllBtnSelect();
+    void refreshBtnStyle(QPushButton *btn);
     void drawRevenueChartFromJson(const QJsonArray& trendArr);
     // 根据桩号查找表格行号工具函数
     int getRowByPileNo(const QString& pileNo);

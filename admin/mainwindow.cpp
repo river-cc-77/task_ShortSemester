@@ -11,6 +11,61 @@
 #include <QSet>
 #include <QDate>
 #include <QTableWidgetItem>
+#include <QVector>
+#include <QLabel>
+#include <QFrame>
+
+namespace {
+
+// 表格列宽策略：stretchCols 均分剩余宽度，contentCols 按内容自适应，
+// 操作列（opCol）固定为 opWidth，保证操作按钮永远有足够空间、不会挤在一起。
+void configureTable(QTableWidget *t,
+                    const QVector<int> &stretchCols,
+                    const QVector<int> &contentCols,
+                    int opCol = -1, int opWidth = 0)
+{
+    QHeaderView *header = t->horizontalHeader();
+    header->setSectionResizeMode(QHeaderView::Interactive);
+    for (int c : stretchCols) {
+        header->setSectionResizeMode(c, QHeaderView::Stretch);
+    }
+    for (int c : contentCols) {
+        header->setSectionResizeMode(c, QHeaderView::ResizeToContents);
+    }
+    if (opCol >= 0) {
+        header->setSectionResizeMode(opCol, QHeaderView::Fixed);
+        t->setColumnWidth(opCol, opWidth);
+    }
+    header->setStretchLastSection(false);
+}
+
+// 表格操作列按钮：统一最小尺寸、手型光标与语义配色（btnType）
+QPushButton *makeOpButton(const QString &text, const char *btnType, int minWidth)
+{
+    auto *btn = new QPushButton(text);
+    btn->setProperty("btnType", btnType);
+    btn->setMinimumWidth(minWidth);
+    btn->setMinimumHeight(30);
+    btn->setCursor(Qt::PointingHandCursor);
+    return btn;
+}
+
+// 操作列容器：按钮组整体居中，四周留白，按钮之间保留 6px 间距
+QWidget *makeOpCell(const QList<QPushButton *> &btns)
+{
+    auto *container = new QWidget();
+    auto *lay = new QHBoxLayout(container);
+    lay->setContentsMargins(8, 3, 8, 3);
+    lay->setSpacing(6);
+    lay->addStretch(1);
+    for (auto *b : btns) {
+        lay->addWidget(b);
+    }
+    lay->addStretch(1);
+    return container;
+}
+
+} // namespace
 
 MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent)
     : QMainWindow(parent)
@@ -20,46 +75,100 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     Q_UNUSED(admin);
     ui->setupUi(this);
     this->setWindowTitle("充电桩管理系统");
+
+    // ========= 侧边栏品牌区（样式见 theme.qss） =========
+    auto *brand = new QLabel(QStringLiteral("充电桩管理系统"), ui->sideBarWidget);
+    brand->setObjectName(QStringLiteral("sidebarBrand"));
+    ui->verticalLayout->insertWidget(0, brand);
+    auto *brandSub = new QLabel(QStringLiteral("CHARGE ADMIN CONSOLE"), ui->sideBarWidget);
+    brandSub->setObjectName(QStringLiteral("sidebarBrandSub"));
+    ui->verticalLayout->insertWidget(1, brandSub);
+    auto *statusLabel = new QLabel(QStringLiteral("● 系统运行正常"), ui->sideBarWidget);
+    statusLabel->setObjectName(QStringLiteral("sidebarStatus"));
+    ui->verticalLayout->insertWidget(2, statusLabel);
+    auto *brandDivider = new QFrame(ui->sideBarWidget);
+    brandDivider->setObjectName(QStringLiteral("sidebarDivider"));
+    brandDivider->setFrameShape(QFrame::NoFrame);
+    brandDivider->setAttribute(Qt::WA_StyledBackground, true);
+    ui->verticalLayout->insertWidget(3, brandDivider);
+    auto *versionLabel = new QLabel(QStringLiteral("ADMIN PLATFORM v2.0"), ui->sideBarWidget);
+    versionLabel->setObjectName(QStringLiteral("sidebarVersion"));
+    ui->verticalLayout->addWidget(versionLabel);
+
+    // ========= 内容区工具条卡片化（样式见 theme.qss） =========
+    const QList<QWidget *> toolbarCards = {
+        ui->widget_4, ui->widget_6, ui->widget_stationFilter, ui->widget,
+        ui->widget_logFilter, ui->widget_orderFilter, ui->widget_2,
+        ui->widget_top_bar, ui->widget_chart
+    };
+    for (QWidget *w : toolbarCards) {
+        w->setAttribute(Qt::WA_StyledBackground, true);
+        if (QLayout *lay = w->layout()) {
+            lay->setContentsMargins(14, 10, 14, 10);
+        }
+    }
+
+    // 统一主界面操作按钮的语义配色与手型光标（样式见 theme.qss）
+    auto markBtn = [](QPushButton *b, const char *cls) {
+        b->setProperty("class", cls);
+        b->setCursor(Qt::PointingHandCursor);
+    };
+    markBtn(ui->btnRefresh, "primary");
+    markBtn(ui->btnPileQuery, "primary");
+    markBtn(ui->btnAddPile, "primary");
+    markBtn(ui->btnRemoteReboot, "primary");
+    markBtn(ui->btnBatchDelete, "danger");
+    markBtn(ui->btnStationQuery, "primary");
+    markBtn(ui->btnStationAdd, "primary");
+    markBtn(ui->btnSearch, "primary");
+    markBtn(ui->btnLogQuery, "primary");
+    markBtn(ui->btnOrderQuery, "primary");
+    markBtn(ui->btnBackHome, "primary");
+    ui->btnGoPileStatus->setCursor(Qt::PointingHandCursor);
+    ui->btnShift->setCursor(Qt::PointingHandCursor);
+    ui->btnSearch->setText(QStringLiteral("查询"));
+    ui->btnSearch->setMinimumWidth(100);
+
     resetAllBtnSelect();
     ui->btnOverview->setProperty("selected", true);
-    ui->btnOverview->setStyleSheet(ui->btnOverview->styleSheet());
+    refreshBtnStyle(ui->btnOverview);
     ui->stackedWidget->setCurrentIndex(0);
 
     // ========= 侧边栏切换 =========
     connect(ui->btnOverview,&QPushButton::clicked,this,[=](){
         resetAllBtnSelect();
         ui->btnOverview->setProperty("selected", true);
-        ui->btnOverview->setStyleSheet(ui->btnOverview->styleSheet());
+        refreshBtnStyle(ui->btnOverview);
         ui->stackedWidget->setCurrentIndex(0);
     });
     connect(ui->btnPile,&QPushButton::clicked,this,[=](){
         resetAllBtnSelect();
         ui->btnPile->setProperty("selected", true);
-        ui->btnPile->setStyleSheet(ui->btnPile->styleSheet());
+        refreshBtnStyle(ui->btnPile);
         ui->stackedWidget->setCurrentIndex(1);
     });
     connect(ui->btnStation,&QPushButton::clicked,this,[=](){
         resetAllBtnSelect();
         ui->btnStation->setProperty("selected", true);
-        ui->btnStation->setStyleSheet(ui->btnStation->styleSheet());
+        refreshBtnStyle(ui->btnStation);
         ui->stackedWidget->setCurrentIndex(2);
     });
     connect(ui->btnUser,&QPushButton::clicked,this,[=](){
         resetAllBtnSelect();
         ui->btnUser->setProperty("selected", true);
-        ui->btnUser->setStyleSheet(ui->btnUser->styleSheet());
+        refreshBtnStyle(ui->btnUser);
         ui->stackedWidget->setCurrentIndex(3);
     });
     connect(ui->btnOrder,&QPushButton::clicked,this,[=](){
         resetAllBtnSelect();
         ui->btnOrder->setProperty("selected", true);
-        ui->btnOrder->setStyleSheet(ui->btnOrder->styleSheet());
+        refreshBtnStyle(ui->btnOrder);
         ui->stackedWidget->setCurrentIndex(6);
     });
     connect(ui->btnLog,&QPushButton::clicked,this,[=](){
         resetAllBtnSelect();
         ui->btnLog->setProperty("selected", true);
-        ui->btnLog->setStyleSheet(ui->btnLog->styleSheet());
+        refreshBtnStyle(ui->btnLog);
         ui->stackedWidget->setCurrentIndex(4);
     });
 
@@ -70,7 +179,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
         }
         resetAllBtnSelect();
         ui->btnChart->setProperty("selected", true);
-        ui->btnChart->setStyleSheet(ui->btnChart->styleSheet());
+        refreshBtnStyle(ui->btnChart);
         ui->stackedWidget->setCurrentIndex(5);
         m_currentDays =7;
         ui->btnShift->setText("查看近30日");
@@ -99,12 +208,29 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     // ========= 初始化图表控件 =========
     m_chart = new QCustomPlot();
     QVBoxLayout* lay = new QVBoxLayout(ui->widget_chart);
-    lay->setContentsMargins(0,0,0,0);
+    lay->setContentsMargins(12, 12, 12, 12);
     lay->addWidget(m_chart);
     m_currentDays =7;
     m_chartTitle = new QCPTextElement(m_chart, "营收趋势 / 万元", QFont("sans",11,QFont::Bold));
     m_chart->plotLayout()->insertRow(0);
     m_chart->plotLayout()->addElement(0,0, m_chartTitle);
+
+    // 图表配色与全局主题统一
+    m_chart->setBackground(QBrush(QColor("#ffffff")));
+    m_chart->axisRect()->setBackground(QBrush(QColor("#ffffff")));
+    m_chart->xAxis->setBasePen(QPen(QColor("#cdd6e4")));
+    m_chart->yAxis->setBasePen(QPen(QColor("#cdd6e4")));
+    m_chart->xAxis->setTickPen(QPen(QColor("#cdd6e4")));
+    m_chart->yAxis->setTickPen(QPen(QColor("#cdd6e4")));
+    m_chart->xAxis->setSubTickPen(QPen(QColor("#e3e9f2")));
+    m_chart->yAxis->setSubTickPen(QPen(QColor("#e3e9f2")));
+    m_chart->xAxis->setTickLabelColor(QColor("#5a6780"));
+    m_chart->yAxis->setTickLabelColor(QColor("#5a6780"));
+    m_chart->xAxis->setLabelColor(QColor("#6b7688"));
+    m_chart->yAxis->setLabelColor(QColor("#6b7688"));
+    m_chart->xAxis->grid()->setPen(QPen(QColor("#eef2f8"), 1, Qt::DashLine));
+    m_chart->yAxis->grid()->setPen(QPen(QColor("#eef2f8"), 1, Qt::DashLine));
+    m_chartTitle->setTextColor(QColor("#22304a"));
 
     // ========= 用户表格初始化 =========
     ui->tableUser->setColumnCount(7);
@@ -122,34 +248,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     ui->tableUser->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     ui->tableUser->verticalHeader()->setDefaultSectionSize(44);
     ui->tableUser->setAlternatingRowColors(true);
-    ui->tableUser->setStyleSheet(R"(
-QTableWidget{
-    border:1px solid #cccccc;
-    gridline-color:#e8e8e8;
-    background-color:#ffffff;
-    alternate-background-color:#f7f9fc;
-}
-QHeaderView::section{
-    background-color:#4078d8;
-    color:white;
-    padding:6px;
-    border:none;
-    font-size:13px;
-}
-QTableWidget::item{
-    padding:4px;
-}
-QPushButton{
-    padding:4px 10px;
-    border-radius:4px;
-    background-color:#4078d8;
-    color:#fff;
-    border:none;
-}
-QPushButton:hover{
-    background-color:#2e64c2;
-}
-    )");
+    configureTable(ui->tableUser, {2}, {0, 1, 3, 4, 5}, 6, 90);
 
     //页面切换信号
     connect(ui->stackedWidget, &QStackedWidget::currentChanged, this, [=](int index){
@@ -212,7 +311,7 @@ QPushButton:hover{
     };
     ui->tableWidgetPile->setHorizontalHeaderLabels(pileHeaders);
     ui->tableWidgetPile->verticalHeader()->setVisible(false);
-    ui->tableWidgetPile->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    configureTable(ui->tableWidgetPile, {1}, {0, 2, 3, 4, 5, 6}, 7, 212);
     ui->tableWidgetPile->verticalHeader()->setDefaultSectionSize(44);
     ui->tableWidgetPile->setAlternatingRowColors(true);
 
@@ -271,10 +370,9 @@ QPushButton:hover{
         QStringLiteral("操作"),
     });
     ui->tableOrder->verticalHeader()->setVisible(false);
-    ui->tableOrder->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    configureTable(ui->tableOrder, {2, 7}, {0, 1, 3, 4, 5, 6}, 8, 170);
     ui->tableOrder->verticalHeader()->setDefaultSectionSize(44);
     ui->tableOrder->setAlternatingRowColors(true);
-    ui->tableOrder->setStyleSheet(ui->tableUser->styleSheet());
 
     connect(ui->btnOrderQuery, &QPushButton::clicked, this, [=]() {
         reloadOrderList();
@@ -297,10 +395,9 @@ QPushButton:hover{
         QStringLiteral("操作"),
     });
     ui->tableStation->verticalHeader()->setVisible(false);
-    ui->tableStation->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    configureTable(ui->tableStation, {2}, {0, 1, 3, 4, 5, 6, 7}, 8, 260);
     ui->tableStation->verticalHeader()->setDefaultSectionSize(44);
     ui->tableStation->setAlternatingRowColors(true);
-    ui->tableStation->setStyleSheet(ui->tableUser->styleSheet());
 
     connect(ui->btnStationQuery, &QPushButton::clicked, this, [=]() {
         reloadStationList();
@@ -340,10 +437,9 @@ QPushButton:hover{
         QStringLiteral("详情"),
     });
     ui->tableLog->verticalHeader()->setVisible(false);
-    ui->tableLog->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    configureTable(ui->tableLog, {5}, {0, 1, 2, 3, 4}, -1, 0);
     ui->tableLog->verticalHeader()->setDefaultSectionSize(40);
     ui->tableLog->setAlternatingRowColors(true);
-    ui->tableLog->setStyleSheet(ui->tableUser->styleSheet());
 
     connect(ui->btnLogQuery, &QPushButton::clicked, this, [=]() {
         reloadOperationLogList();
@@ -363,8 +459,15 @@ void MainWindow::resetAllBtnSelect()
     for(auto btn : btns)
     {
         btn->setProperty("selected", false);
-        btn->setStyleSheet(btn->styleSheet());
+        refreshBtnStyle(btn);
     }
+}
+
+void MainWindow::refreshBtnStyle(QPushButton *btn)
+{
+    btn->style()->unpolish(btn);
+    btn->style()->polish(btn);
+    btn->update();
 }
 
 void MainWindow::reloadUserList(const QString &keyword)
@@ -481,12 +584,9 @@ void MainWindow::addUserRow(const QJsonObject &userObj)
     QString statusText = userObj["status"].toString();
     bool isFrozen = (statusText == QStringLiteral("冻结"));
     ui->tableUser->setItem(row, 5, mkReadOnly(statusText));
-    QWidget *btnContainer = new QWidget();
-    QHBoxLayout *btnLayout = new QHBoxLayout(btnContainer);
-    btnLayout->setContentsMargins(4,2,4,2);
-    QPushButton *opBtn = new QPushButton(isFrozen ? QStringLiteral("解冻") : QStringLiteral("冻结"));
-    btnLayout->addWidget(opBtn);
-    ui->tableUser->setCellWidget(row,6, btnContainer);
+    QPushButton *opBtn = makeOpButton(isFrozen ? QStringLiteral("解冻") : QStringLiteral("冻结"),
+                                      isFrozen ? "success" : "warning", 64);
+    ui->tableUser->setCellWidget(row, 6, makeOpCell({opBtn}));
     connect(opBtn,&QPushButton::clicked,this,[=](){
         onUserFreezeClick(uid, !isFrozen);
     });
@@ -605,27 +705,27 @@ void MainWindow::addPileRow(const QJsonObject &obj)
     ui->tableWidgetPile->setItem(row, 5, mkReadOnly(QString::number(obj["charge_count"].toInt())));
     ui->tableWidgetPile->setItem(row, 6, mkReadOnly(QString::number(obj["charge_minutes"].toInt())));
 
-    QWidget *container = new QWidget();
-    QHBoxLayout *hlay = new QHBoxLayout(container);
-    hlay->setContentsMargins(4,2,4,2);
-    QPushButton *btnEdit = new QPushButton("编辑");
-    QPushButton *btnRestart = new QPushButton("重启");
-    QPushButton *btnDel = new QPushButton("删除");
-    hlay->addWidget(btnEdit);
+    QPushButton *btnEdit = makeOpButton(QStringLiteral("编辑"), "primary", 56);
+    QPushButton *btnRestart = nullptr;
+    QPushButton *btnDel = makeOpButton(QStringLiteral("删除"), "danger", 56);
+    QList<QPushButton*> opBtns{btnEdit};
     if (pileStatus == QStringLiteral("闲置") || pileStatus == QStringLiteral("故障")) {
-        hlay->addWidget(btnRestart);
+        btnRestart = makeOpButton(QStringLiteral("重启"), "warning", 56);
+        opBtns << btnRestart;
     }
-    hlay->addWidget(btnDel);
-    ui->tableWidgetPile->setCellWidget(row,7, container);
+    opBtns << btnDel;
+    ui->tableWidgetPile->setCellWidget(row, 7, makeOpCell(opBtns));
 
     // 修改这里：点击btnEdit直接调用onEditPileBtnClicked
     connect(btnEdit,&QPushButton::clicked,this,[=](){
         qDebug()<<"编辑电桩 pileNo="<<pileNo;
         onEditPileBtnClicked(pileNo);
     });
-    connect(btnRestart,&QPushButton::clicked,this,[=](){
-        onPileRestart(pileNo);
-    });
+    if (btnRestart) {
+        connect(btnRestart,&QPushButton::clicked,this,[=](){
+            onPileRestart(pileNo);
+        });
+    }
     connect(btnDel,&QPushButton::clicked,this,[=](){
         auto ret = QMessageBox::question(this,"确认","确定删除该电桩？");
         if(ret == QMessageBox::Yes)
@@ -821,9 +921,12 @@ void MainWindow::drawRevenueChartFromJson(const QJsonArray &trendArr)
 
     QCPGraph *graph = m_chart->addGraph();
     graph->setData(x, y);
-    graph->setPen(QPen(QColor(0x4078d8), 2));
+    graph->setPen(QPen(QColor("#2B6BFF"), 2.5));
+    graph->setBrush(QBrush(QColor(43, 107, 255, 36)));
     QCPScatterStyle circleStyle(QCPScatterStyle::ssCircle);
-    circleStyle.setSize(4);
+    circleStyle.setSize(5);
+    circleStyle.setPen(QPen(QColor("#2B6BFF"), 1.5));
+    circleStyle.setBrush(QBrush(QColor("#FFFFFF")));
     graph->setScatterStyle(circleStyle);
 
     QSharedPointer<QCPAxisTickerText> ticker(new QCPAxisTickerText());
@@ -867,7 +970,7 @@ void MainWindow::on_btnBackHome_clicked()
 {
     resetAllBtnSelect();
     ui->btnOverview->setProperty("selected", true);
-    ui->btnOverview->setStyleSheet(ui->btnOverview->styleSheet());
+    refreshBtnStyle(ui->btnOverview);
     ui->stackedWidget->setCurrentIndex(0);
     reloadOverviewStat(); //切回去立刻刷新统计卡片
 }
@@ -1117,25 +1220,21 @@ void MainWindow::addOrderRow(const QJsonObject &obj)
     ui->tableOrder->setItem(row, 6, mkReadOnly(QString::number(obj.value("amount").toDouble())));
     ui->tableOrder->setItem(row, 7, mkReadOnly(obj.value("start_at").toString()));
 
-    QWidget *container = new QWidget();
-    QHBoxLayout *layout = new QHBoxLayout(container);
-    layout->setContentsMargins(4, 2, 4, 2);
-
-    QPushButton *btnDetail = new QPushButton(QStringLiteral("详情"));
-    layout->addWidget(btnDetail);
+    QPushButton *btnDetail = makeOpButton(QStringLiteral("详情"), "primary", 60);
+    QList<QPushButton*> opBtns{btnDetail};
     connect(btnDetail, &QPushButton::clicked, this, [=]() {
         onOrderDetailClicked(obj);
     });
 
     if (status == QStringLiteral("待支付")) {
-        QPushButton *btnSettle = new QPushButton(QStringLiteral("代结算"));
-        layout->addWidget(btnSettle);
+        QPushButton *btnSettle = makeOpButton(QStringLiteral("代结算"), "success", 78);
+        opBtns << btnSettle;
         connect(btnSettle, &QPushButton::clicked, this, [=]() {
             onOrderAdminSettle(orderNo);
         });
     }
 
-    ui->tableOrder->setCellWidget(row, 8, container);
+    ui->tableOrder->setCellWidget(row, 8, makeOpCell(opBtns));
 }
 
 void MainWindow::onOrderDetailClicked(const QJsonObject &order)
@@ -1230,18 +1329,12 @@ void MainWindow::addStationRow(const QJsonObject &obj)
     ui->tableStation->setItem(row, 6, mkReadOnly(QStringLiteral("%1%").arg(onlineRate * 100.0, 0, 'f', 1)));
     ui->tableStation->setItem(row, 7, mkReadOnly(obj.value(QStringLiteral("created_at")).toString()));
 
-    QWidget *container = new QWidget();
-    QHBoxLayout *layout = new QHBoxLayout(container);
-    layout->setContentsMargins(4, 2, 4, 2);
-
-    QPushButton *btnDetail = new QPushButton(QStringLiteral("详情"));
-    QPushButton *btnPiles = new QPushButton(QStringLiteral("电桩"));
-    QPushButton *btnEdit = new QPushButton(QStringLiteral("编辑"));
-    QPushButton *btnDelete = new QPushButton(QStringLiteral("删除"));
-    layout->addWidget(btnDetail);
-    layout->addWidget(btnPiles);
-    layout->addWidget(btnEdit);
-    layout->addWidget(btnDelete);
+    QPushButton *btnDetail = makeOpButton(QStringLiteral("详情"), "primary", 52);
+    QPushButton *btnPiles = makeOpButton(QStringLiteral("电桩"), "primary", 52);
+    QPushButton *btnEdit = makeOpButton(QStringLiteral("编辑"), "primary", 52);
+    QPushButton *btnDelete = makeOpButton(QStringLiteral("删除"), "danger", 52);
+    ui->tableStation->setCellWidget(row, 8,
+        makeOpCell({btnDetail, btnPiles, btnEdit, btnDelete}));
 
     connect(btnDetail, &QPushButton::clicked, this, [=]() {
         onStationDetailClicked(obj);
@@ -1255,8 +1348,6 @@ void MainWindow::addStationRow(const QJsonObject &obj)
     connect(btnDelete, &QPushButton::clicked, this, [=]() {
         onDeleteStationClicked(obj);
     });
-
-    ui->tableStation->setCellWidget(row, 8, container);
 }
 
 void MainWindow::onStationDetailClicked(const QJsonObject &station)
@@ -1290,7 +1381,7 @@ void MainWindow::goToStationPiles(int stationId)
 
     resetAllBtnSelect();
     ui->btnPile->setProperty("selected", true);
-    ui->btnPile->setStyleSheet(ui->btnPile->styleSheet());
+    refreshBtnStyle(ui->btnPile);
 
     loadStationCombo();
 

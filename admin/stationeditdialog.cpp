@@ -8,6 +8,11 @@ StationEditDialog::StationEditDialog(QWidget *parent)
     , ui(new Ui::StationEditDialog)
 {
     ui->setupUi(this);
+    setAttribute(Qt::WA_StyledBackground, true);
+
+    ui->btnOk->setProperty("class", "primary");
+    ui->btnOk->setCursor(Qt::PointingHandCursor);
+    ui->btnCancel->setCursor(Qt::PointingHandCursor);
 
     ui->spinLat->setDecimals(6);
     ui->spinLat->setRange(-90.0, 90.0);

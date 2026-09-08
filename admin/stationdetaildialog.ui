@@ -6,8 +6,29 @@
    <string>电站详情</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="leftMargin">
+    <number>24</number>
+   </property>
+   <property name="topMargin">
+    <number>20</number>
+   </property>
+   <property name="rightMargin">
+    <number>24</number>
+   </property>
+   <property name="bottomMargin">
+    <number>16</number>
+   </property>
+   <property name="spacing">
+    <number>14</number>
+   </property>
    <item>
     <layout class="QFormLayout" name="formLayout">
+     <property name="horizontalSpacing">
+      <number>16</number>
+     </property>
+     <property name="verticalSpacing">
+      <number>12</number>
+     </property>
      <item row="0" column="0">
       <widget class="QLabel" name="lblId">
        <property name="text">
@@ -121,6 +142,12 @@
      </item>
      <item>
       <widget class="QPushButton" name="btnViewPiles">
+       <property name="minimumSize">
+        <size>
+         <width>120</width>
+         <height>36</height>
+        </size>
+       </property>
        <property name="text">
         <string>跳转电桩页</string>
        </property>
@@ -128,6 +155,12 @@
      </item>
      <item>
       <widget class="QPushButton" name="btnClose">
+       <property name="minimumSize">
+        <size>
+         <width>100</width>
+         <height>36</height>
+        </size>
+       </property>
        <property name="text">
         <string>关闭</string>
        </property>

@@ -11,88 +11,76 @@ LoginWindow::LoginWindow(ApiClient *api, QWidget *parent)
     : QWidget(parent)
     , m_api(api)
 {
-    setWindowTitle(QStringLiteral("充电桩管理端 - 登录"));
-    resize(660, 400);
+    setWindowTitle(QStringLiteral("充电桩管理系统"));
+    setObjectName(QStringLiteral("loginRoot"));
+    setAttribute(Qt::WA_StyledBackground, true);
+    resize(760, 520);
+    setMinimumSize(700, 500);
 
-    setStyleSheet(R"(
-    QWidget{
-        background-color:#f7f8fa;
-    }
-    QLineEdit{
-        border:1px solid #dddddd;
-        border-radius:8px;
-        padding:10px 12px;
-        font-size:11pt;
-        background-color:#ffffff;
-    }
-    QLineEdit:focus{
-        border:1px solid #4078e8;
-    }
-    QPushButton{
-        background-color:#4078e8;
-        color:#ffffff;
-        border:none;
-        border-radius:8px;
-        padding:11px;
-        font-size:11pt;
-        font-weight:500;
-    }
-    QPushButton:hover{
-        background-color:#2f62cc;
-    }
-    QPushButton:pressed{
-        background-color:#2552ad;
-    }
-    QPushButton:disabled{
-        background-color:#88a8e0;
-    }
-    QLabel#errorLabel{
-        color:#dd3333;
-    }
-    )");
+    // ========== 表单输入 ==========
+    m_userEdit = new QLineEdit(this);
+    m_userEdit->setPlaceholderText(QStringLiteral("请输入管理员账号"));
+    m_userEdit->setText(QStringLiteral("admin"));
 
-    m_userEdit = new QLineEdit(QStringLiteral("admin"), this);
     m_passEdit = new QLineEdit(this);
     m_passEdit->setEchoMode(QLineEdit::Password);
-    m_passEdit->setPlaceholderText(QStringLiteral("默认 123456"));
+    m_passEdit->setPlaceholderText(QStringLiteral("请输入密码（默认 123456）"));
 
-    // ========== 定死500像素宽度 ==========
-    const int inputWidth = 375;
+    const int inputWidth = 360;
     m_userEdit->setFixedWidth(inputWidth);
     m_passEdit->setFixedWidth(inputWidth);
 
     auto *form = new QFormLayout;
-    // 关键：关闭表单自动拉伸右侧输入框！否则会覆盖fixedWidth
     form->setFieldGrowthPolicy(QFormLayout::FieldsStayAtSizeHint);
-    form->setLabelAlignment(Qt::AlignRight|Qt::AlignVCenter);
-    form->setHorizontalSpacing(14);
-    form->setVerticalSpacing(20);
+    form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    form->setHorizontalSpacing(16);
+    form->setVerticalSpacing(18);
     form->addRow(QStringLiteral("账号"), m_userEdit);
     form->addRow(QStringLiteral("密码"), m_passEdit);
 
+    // ========== 登录按钮 ==========
     m_loginButton = new QPushButton(QStringLiteral("登录"), this);
+    m_loginButton->setProperty("class", "primary");
     m_loginButton->setFixedWidth(inputWidth);
-    m_errorLabel = new QLabel(this);
-    m_errorLabel->setObjectName("errorLabel");
-    m_errorLabel->setAlignment(Qt::AlignCenter);
+    m_loginButton->setMinimumHeight(42);
+    m_loginButton->setCursor(Qt::PointingHandCursor);
 
-    QWidget *centerCard = new QWidget(this);
-    centerCard->setMaximumWidth(inputWidth + 80);
-    auto *cardLayout = new QVBoxLayout(centerCard);
-    cardLayout->setContentsMargins(0,0,0,0);
-    cardLayout->setSpacing(22);
+    m_errorLabel = new QLabel(this);
+    m_errorLabel->setObjectName(QStringLiteral("errorLabel"));
+    m_errorLabel->setAlignment(Qt::AlignCenter);
+    m_errorLabel->setWordWrap(true);
+
+    // ========== 标题区 ==========
+    auto *title = new QLabel(QStringLiteral("充电桩管理系统"), this);
+    title->setObjectName(QStringLiteral("loginTitle"));
+    title->setAlignment(Qt::AlignCenter);
+
+    auto *subtitle = new QLabel(QStringLiteral("Charge Pile Admin Console"), this);
+    subtitle->setObjectName(QStringLiteral("loginSubtitle"));
+    subtitle->setAlignment(Qt::AlignCenter);
+
+    // ========== 白色卡片 ==========
+    auto *card = new QWidget(this);
+    card->setObjectName(QStringLiteral("loginCard"));
+    card->setAttribute(Qt::WA_StyledBackground, true);
+    auto *cardLayout = new QVBoxLayout(card);
+    cardLayout->setContentsMargins(48, 44, 48, 40);
+    cardLayout->setSpacing(20);
+    cardLayout->addWidget(title);
+    cardLayout->addWidget(subtitle);
+    cardLayout->addSpacing(8);
     cardLayout->addLayout(form);
-    cardLayout->addWidget(m_loginButton,0,Qt::AlignHCenter); //按钮居中
+    cardLayout->addWidget(m_loginButton, 0, Qt::AlignHCenter);
     cardLayout->addWidget(m_errorLabel);
 
     auto *rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(30,40,30,40);
+    rootLayout->setContentsMargins(40, 36, 40, 36);
     rootLayout->addStretch(1);
-    rootLayout->addWidget(centerCard, 0, Qt::AlignHCenter);
+    rootLayout->addWidget(card, 0, Qt::AlignHCenter);
     rootLayout->addStretch(1);
-    setLayout(rootLayout);
 
     connect(m_loginButton, &QPushButton::clicked, this, &LoginWindow::onLoginClicked);
+    connect(m_passEdit, &QLineEdit::returnPressed, this, &LoginWindow::onLoginClicked);
 }
 
 void LoginWindow::onLoginClicked()

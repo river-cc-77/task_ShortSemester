@@ -10,7 +10,12 @@ PileAddDialog::PileAddDialog(QWidget *parent)
     , ui(new Ui::PileAddDialog)
 {
     ui->setupUi(this);
+    setAttribute(Qt::WA_StyledBackground, true);
     setWindowTitle(QStringLiteral("新增电桩"));
+
+    ui->btnOk->setProperty("class", "primary");
+    ui->btnOk->setCursor(Qt::PointingHandCursor);
+    ui->btnCancel->setCursor(Qt::PointingHandCursor);
 
     connect(ui->btnOk, &QPushButton::clicked, this, &QDialog::accept);
     connect(ui->btnCancel, &QPushButton::clicked, this, &QDialog::reject);

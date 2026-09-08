@@ -6,6 +6,11 @@ PileEditDialog::PileEditDialog(QWidget *parent) :
     ui(new Ui::PileEditDialog)
 {
     ui->setupUi(this);
+    setAttribute(Qt::WA_StyledBackground, true);
+    setWindowTitle(QStringLiteral("编辑电桩"));
+    ui->btnOk->setProperty("class", "primary");
+    ui->btnOk->setCursor(Qt::PointingHandCursor);
+    ui->btnCancel->setCursor(Qt::PointingHandCursor);
     ui->spinPower->setRange(0.01, 500.0);
     ui->spinPower->setDecimals(2);
     connect(ui->btnOk, &QPushButton::clicked, this, &QDialog::accept);

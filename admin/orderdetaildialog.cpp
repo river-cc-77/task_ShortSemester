@@ -6,7 +6,11 @@ OrderDetailDialog::OrderDetailDialog(QWidget *parent)
     , ui(new Ui::OrderDetailDialog)
 {
     ui->setupUi(this);
+    setAttribute(Qt::WA_StyledBackground, true);
     setWindowTitle(QStringLiteral("订单详情"));
+    ui->btnSettle->setProperty("class", "success");
+    ui->btnSettle->setCursor(Qt::PointingHandCursor);
+    ui->btnClose->setCursor(Qt::PointingHandCursor);
     connect(ui->btnClose, &QPushButton::clicked, this, &QDialog::accept);
     connect(ui->btnSettle, &QPushButton::clicked, this, &OrderDetailDialog::onSettleClicked);
 }
