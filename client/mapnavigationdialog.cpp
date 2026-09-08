@@ -227,6 +227,9 @@ QString buildBaiduJsMapHtml(const QString &ak,
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>html,body,#map{margin:0;padding:0;width:100%;height:100%;background:#edf2f9;}</style>
+</head>
+<body>
+<div id="map"></div>
 <script>
 var map = null;
 window.__routePath = %2;
@@ -246,7 +249,9 @@ function drawRoute(pathArr) {
   map.setViewport(pts);
 }
 function initBaiduMap() {
-  map = new BMap.Map('map');
+  var el = document.getElementById('map');
+  if (!el) return;
+  map = new BMap.Map(el);
   map.enableScrollWheelZoom(true);
   map.enableDragging(true);
   map.enableDoubleClickZoom(true);
@@ -258,7 +263,7 @@ function initBaiduMap() {
 }
 </script>
 <script src="https://api.map.baidu.com/api?v=3.0&ak=%1&callback=initBaiduMap"></script>
-</head><body><div id="map"></div></body></html>)")
+</body></html>)")
         .arg(ak, pathJson, jsStringLiteral(originName), jsStringLiteral(destName));
 }
 #endif
