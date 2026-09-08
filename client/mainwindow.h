@@ -28,6 +28,8 @@ private slots:
     void onProfileCenter();   // 个人中心
     void onOrderHistory();   // 订单历史
     void onFavoriteList();   // 收藏列表
+    void onAnnouncementList(); // 公告列表
+    void showMapNavigation(double destLat, double destLng, const QString &destName);
 private:
     void loadStations();
     void showStationDetail(int stationId); // 弹出站点详情对话框
@@ -55,6 +57,7 @@ private:
     QPushButton *m_profileButton = nullptr;
     QPushButton *m_orderButton = nullptr;
     QPushButton *m_favoriteButton = nullptr;
+    QPushButton *m_announcementButton = nullptr;
 };
 
 #endif // MAINWINDOW_H

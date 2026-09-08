@@ -34,6 +34,7 @@ LoginWindow::LoginWindow(ApiClient *api, QWidget *parent)
     m_phoneEdit->setPlaceholderText(QStringLiteral("请输入 11 位手机号"));
     m_phoneEdit->setMaxLength(11);
     m_phoneEdit->setMinimumHeight(44);
+    m_phoneEdit->setAttribute(Qt::WA_InputMethodEnabled, true);
 
     // ========== 登录按钮（品牌蓝主按钮） ==========
     m_loginButton = new QPushButton(QStringLiteral("登 录"), this);

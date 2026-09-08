@@ -1480,6 +1480,82 @@ QJsonArray DbManager::fetchAnnouncements()
     return items;
 }
 
+QJsonArray DbManager::fetchAdminAnnouncements()
+{
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT id, title, content, is_active, created_at "
+        "FROM announcement ORDER BY id DESC");
+
+    QJsonArray items;
+    if (!query.exec()) {
+        qWarning() << "fetchAdminAnnouncements failed:" << query.lastError().text();
+        return items;
+    }
+    while (query.next()) {
+        QJsonObject row;
+        row["id"] = query.value("id").toInt();
+        row["title"] = query.value("title").toString();
+        row["content"] = query.value("content").toString();
+        row["is_active"] = query.value("is_active").toInt();
+        row["created_at"] = query.value("created_at").toString();
+        items.append(row);
+    }
+    return items;
+}
+
+bool DbManager::createAnnouncement(const QString &title, const QString &content, bool isActive)
+{
+    QSqlQuery query(m_db);
+    query.prepare(
+        "INSERT INTO announcement (title, content, is_active, created_at) "
+        "VALUES (:title, :content, :active, datetime('now','localtime'))");
+    query.bindValue(":title", title);
+    query.bindValue(":content", content);
+    query.bindValue(":active", isActive ? 1 : 0);
+    return query.exec();
+}
+
+bool DbManager::updateAnnouncement(int id, const QString &title, const QString &content,
+                                     int isActive)
+{
+    QStringList sets;
+    if (!title.isEmpty()) {
+        sets << "title = :title";
+    }
+    if (!content.isEmpty()) {
+        sets << "content = :content";
+    }
+    if (isActive >= 0) {
+        sets << "is_active = :active";
+    }
+    if (sets.isEmpty()) {
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QString("UPDATE announcement SET %1 WHERE id = :id").arg(sets.join(", ")));
+    query.bindValue(":id", id);
+    if (!title.isEmpty()) {
+        query.bindValue(":title", title);
+    }
+    if (!content.isEmpty()) {
+        query.bindValue(":content", content);
+    }
+    if (isActive >= 0) {
+        query.bindValue(":active", isActive);
+    }
+    return query.exec() && query.numRowsAffected() > 0;
+}
+
+bool DbManager::deleteAnnouncement(int id)
+{
+    QSqlQuery query(m_db);
+    query.prepare("DELETE FROM announcement WHERE id = :id");
+    query.bindValue(":id", id);
+    return query.exec() && query.numRowsAffected() > 0;
+}
+
 // ============================================================
 // 负荷预测
 // ============================================================

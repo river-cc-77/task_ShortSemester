@@ -95,6 +95,10 @@ public:
 
     // ===== 公告 =====
     QJsonArray fetchAnnouncements();
+    QJsonArray fetchAdminAnnouncements();
+    bool createAnnouncement(const QString &title, const QString &content, bool isActive);
+    bool updateAnnouncement(int id, const QString &title, const QString &content, int isActive);
+    bool deleteAnnouncement(int id);
 
     // ===== 日志 =====
     bool writeOperationLog(int adminId, const QString &action,

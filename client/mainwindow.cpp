@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "apiclient.h"
+#include "mapnavigationdialog.h"
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QLabel>
@@ -192,15 +193,18 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     m_profileButton = new QPushButton(QStringLiteral("个人中心"), headerCard);
     m_orderButton = new QPushButton(QStringLiteral("订单历史"), headerCard);
     m_favoriteButton = new QPushButton(QStringLiteral("我的收藏"), headerCard);
+    m_announcementButton = new QPushButton(QStringLiteral("公告"), headerCard);
     m_profileButton->setCursor(Qt::PointingHandCursor);
     m_orderButton->setCursor(Qt::PointingHandCursor);
     m_favoriteButton->setCursor(Qt::PointingHandCursor);
+    m_announcementButton->setCursor(Qt::PointingHandCursor);
 
     auto *navRow = new QHBoxLayout;
     navRow->setSpacing(8);
     navRow->addWidget(m_profileButton, 1);
     navRow->addWidget(m_orderButton, 1);
     navRow->addWidget(m_favoriteButton, 1);
+    navRow->addWidget(m_announcementButton, 1);
 
     auto *headerLayout = new QVBoxLayout(headerCard);
     headerLayout->setContentsMargins(16, 12, 16, 12);
@@ -254,6 +258,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     // 地址输入 + 地理编码
     m_addressEdit = new QLineEdit(searchCard);
     m_addressEdit->setPlaceholderText(QStringLiteral("输入地址，如：深圳市南山区科技园"));
+    m_addressEdit->setAttribute(Qt::WA_InputMethodEnabled, true);
     m_geocodeButton = new QPushButton(QStringLiteral("地理编码"), searchCard);
     m_geocodeButton->setCursor(Qt::PointingHandCursor);
 
@@ -301,6 +306,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     connect(m_profileButton, &QPushButton::clicked, this, &MainWindow::onProfileCenter);
     connect(m_orderButton, &QPushButton::clicked, this, &MainWindow::onOrderHistory);
     connect(m_favoriteButton, &QPushButton::clicked, this, &MainWindow::onFavoriteList);
+    connect(m_announcementButton, &QPushButton::clicked, this, &MainWindow::onAnnouncementList);
     loadStations();
 
     QTimer::singleShot(0, this, [this]() { checkOpenOrder(false); });
@@ -387,14 +393,17 @@ void MainWindow::showStationDetail(int stationId)
     // 按钮行
     auto *reserveBtn = new QPushButton(QStringLiteral("预约选中桩"), &dlg);
     auto *favoriteBtn = new QPushButton(QStringLiteral("收藏该站"), &dlg);
+    auto *navBtn = new QPushButton(QStringLiteral("一键导航"), &dlg);
     auto *closeBtn = new QPushButton(QStringLiteral("关闭"), &dlg);
     reserveBtn->setStyleSheet(m_refreshButton->styleSheet());
     favoriteBtn->setStyleSheet(m_refreshButton->styleSheet());
+    navBtn->setStyleSheet(m_refreshButton->styleSheet());
     closeBtn->setStyleSheet(m_refreshButton->styleSheet());
 
     auto *btnRow = new QHBoxLayout;
     btnRow->addWidget(reserveBtn);
     btnRow->addWidget(favoriteBtn);
+    btnRow->addWidget(navBtn);
     btnRow->addStretch();
     btnRow->addWidget(closeBtn);
 
@@ -425,6 +434,14 @@ void MainWindow::showStationDetail(int stationId)
                              .arg(station.value(QStringLiteral("address")).toString())
                              .arg(station.value(QStringLiteral("price")).toDouble(), 0, 'f', 2)
                              .arg(piles.size()));
+
+    const double destLat = station.value(QStringLiteral("lat")).toDouble();
+    const double destLng = station.value(QStringLiteral("lng")).toDouble();
+    const QString destName = station.value(QStringLiteral("name")).toString();
+
+    connect(navBtn, &QPushButton::clicked, &dlg, [this, destLat, destLng, destName]() {
+        showMapNavigation(destLat, destLng, destName);
+    });
 
     // 填充电桩列表
     for (const QJsonValue &v : piles) {
@@ -1072,6 +1089,101 @@ void MainWindow::onFavoriteList()
         }
         QMessageBox::information(&dlg, QStringLiteral("提示"), QStringLiteral("已取消收藏"));
         loadFavorites();
+    });
+
+    dlg.exec();
+}
+
+void MainWindow::showMapNavigation(double destLat, double destLng, const QString &destName)
+{
+    if (m_latEdit->text().trimmed().isEmpty() || m_lngEdit->text().trimmed().isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("请先设置当前位置（经纬度或地理编码）后再导航"));
+        return;
+    }
+
+    const double originLat = m_latEdit->text().toDouble();
+    const double originLng = m_lngEdit->text().toDouble();
+    MapNavigationDialog navDlg(originLat, originLng, destLat, destLng, destName, m_baiduAk, this);
+    navDlg.exec();
+}
+
+void MainWindow::onAnnouncementList()
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("系统公告"));
+    dlg.resize(childDialogSize(this, 520));
+
+    auto *lay = new QVBoxLayout(&dlg);
+    auto *listWidget = new WrapListWidget(&dlg);
+    auto *viewBtn = new QPushButton(QStringLiteral("查看详情"), &dlg);
+    auto *closeBtn = new QPushButton(QStringLiteral("关闭"), &dlg);
+    viewBtn->setStyleSheet(m_refreshButton->styleSheet());
+    closeBtn->setStyleSheet(m_refreshButton->styleSheet());
+    listWidget->setStyleSheet(m_stationList->styleSheet());
+
+    auto *btnRow = new QHBoxLayout;
+    btnRow->addWidget(viewBtn);
+    btnRow->addStretch();
+    btnRow->addWidget(closeBtn);
+    lay->addWidget(listWidget);
+    lay->addLayout(btnRow);
+    connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::close);
+
+    const QJsonObject resp = m_api->call(QStringLiteral("announcement.list"), QJsonObject());
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        const QJsonObject err = resp.value(QStringLiteral("error")).toObject();
+        QMessageBox::warning(&dlg, QStringLiteral("提示"),
+                             err.value(QStringLiteral("message")).toString());
+        dlg.exec();
+        return;
+    }
+
+    const QJsonArray items = resp.value(QStringLiteral("data")).toObject()
+                                .value(QStringLiteral("items")).toArray();
+    if (items.isEmpty()) {
+        listWidget->addItem(QStringLiteral("暂无公告"));
+    } else {
+        for (const QJsonValue &val : items) {
+            const QJsonObject ann = val.toObject();
+            const QString line = QStringLiteral("%1  [%2]")
+                                     .arg(ann.value(QStringLiteral("title")).toString())
+                                     .arg(ann.value(QStringLiteral("created_at")).toString());
+            auto *item = new QListWidgetItem(line);
+            item->setData(Qt::UserRole, ann.value(QStringLiteral("id")).toInt());
+            item->setData(Qt::UserRole + 1, ann.value(QStringLiteral("title")).toString());
+            item->setData(Qt::UserRole + 2, ann.value(QStringLiteral("content")).toString());
+            listWidget->addItem(item);
+        }
+    }
+
+    connect(viewBtn, &QPushButton::clicked, &dlg, [&]() {
+        QListWidgetItem *item = listWidget->currentItem();
+        if (!item || item->data(Qt::UserRole).isNull()) {
+            QMessageBox::information(&dlg, QStringLiteral("提示"),
+                                     QStringLiteral("请先选择一条公告"));
+            return;
+        }
+        QDialog detailDlg(&dlg);
+        detailDlg.setWindowTitle(item->data(Qt::UserRole + 1).toString());
+        detailDlg.resize(childDialogSize(&dlg, 360));
+        auto *detailLay = new QVBoxLayout(&detailDlg);
+        auto *content = new QTextEdit(&detailDlg);
+        content->setReadOnly(true);
+        content->setPlainText(item->data(Qt::UserRole + 2).toString());
+        auto *okBtn = new QPushButton(QStringLiteral("知道了"), &detailDlg);
+        okBtn->setStyleSheet(m_refreshButton->styleSheet());
+        connect(okBtn, &QPushButton::clicked, &detailDlg, &QDialog::accept);
+        detailLay->addWidget(content);
+        detailLay->addWidget(okBtn, 0, Qt::AlignRight);
+        detailDlg.exec();
+    });
+
+    connect(listWidget, &QListWidget::itemDoubleClicked, &dlg, [&](QListWidgetItem *item) {
+        if (!item) {
+            return;
+        }
+        viewBtn->click();
     });
 
     dlg.exec();

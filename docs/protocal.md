@@ -104,7 +104,11 @@
 | `ping` | 全部 | **P0** | 连通测试 |
 | `user.login` | 用户端 | **P0** | 手机号登录/注册 |
 | `admin.login` | 管理端 | **P0** | 管理员登录 |
-| `announcement.list` | 用户端 | P1 | 首页公告 |
+| `announcement.list` | 用户端 | P1 | 首页公告（仅启用） |
+| `announcement.admin.list` | 管理端 | P1 | 公告管理列表（含停用） |
+| `announcement.create` | 管理端 | P1 | 新增公告 |
+| `announcement.update` | 管理端 | P1 | 编辑公告 |
+| `announcement.delete` | 管理端 | P1 | 删除公告 |
 | `station.list` | 用户端 | P1 | 附近充电站列表 |
 | `station.detail` | 用户端 | P1 | 电站详情含电桩 |
 | `station.favorite.add` | 用户端 | P2 | 收藏电站 |
@@ -266,6 +270,18 @@
   ]
 }
 ```
+
+---
+
+### 4.1b 公告管理（管理端）
+
+**`announcement.admin.list`** — 返回全部公告（含 `is_active`）。
+
+**`announcement.create`** — data: `{ "title": "...", "content": "...", "is_active": true }`
+
+**`announcement.update`** — data: `{ "id": 1, "title"?: "...", "content"?: "...", "is_active"?: true }`
+
+**`announcement.delete`** — data: `{ "id": 1 }`
 
 ---
 

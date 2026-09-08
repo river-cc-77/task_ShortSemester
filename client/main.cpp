@@ -1,6 +1,7 @@
 #include "loginwindow.h"
 #include "mainwindow.h"
 #include "apiclient.h"
+#include "imsetup.h"
 
 #include <QApplication>
 #include <QFile>
@@ -10,6 +11,7 @@
 
 int main(int argc, char *argv[])
 {
+    setupInputMethodEnv();   // 必须在 QApplication 之前
     QApplication app(argc, argv);
 
     // 统一字体（与 Admin 端一致）

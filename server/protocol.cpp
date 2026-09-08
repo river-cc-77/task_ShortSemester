@@ -213,6 +213,18 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
     if (cmd == "announcement.list") {
         return AnnouncementHandler::list(id, token, data);
     }
+    if (cmd == "announcement.admin.list") {
+        return AnnouncementHandler::adminList(id, token, data);
+    }
+    if (cmd == "announcement.create") {
+        return AnnouncementHandler::create(id, token, data);
+    }
+    if (cmd == "announcement.update") {
+        return AnnouncementHandler::update(id, token, data);
+    }
+    if (cmd == "announcement.delete") {
+        return AnnouncementHandler::remove(id, token, data);
+    }
 
     return makeError(id, "UNKNOWN_CMD", "未知命令: " + cmd);
 }

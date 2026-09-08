@@ -3,6 +3,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QMainWindow>
+#include <QMap>
+class QPushButton;
 #include "qcustomplot.h"
 #include "pileeditdialog.h"
 #include "pilestatusdialog.h"
@@ -10,6 +12,7 @@
 #include "orderdetaildialog.h"
 #include "stationeditdialog.h"
 #include "stationdetaildialog.h"
+#include "announcementmanagedialog.h"
 class ApiClient;
 namespace Ui {
 class MainWindow;
@@ -64,6 +67,8 @@ private:
     ApiClient *m_api = nullptr;
     bool m_refreshBusy = false;
     QJsonArray m_stationItems;
+    QMap<int, int> m_forecastMinIdle;
+    QPushButton *m_btnAnnouncement = nullptr;
     void resetAllBtnSelect();
     void refreshBtnStyle(QPushButton *btn);
     void drawRevenueChartFromJson(const QJsonArray& trendArr);

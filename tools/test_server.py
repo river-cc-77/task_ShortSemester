@@ -267,10 +267,61 @@ def main() -> int:
     # ===== §5 公告 =====
 
     # id=13 announcement.list — 用户端首页公告，返回 items 数组
-    run_test(
+    ann_before = run_test(
         host, port,
         {"id": "13", "cmd": "announcement.list", "token": token, "data": {}},
         "announcement.list",
+    )
+    user_ann_count = len(ann_before["data"]["items"])
+
+    # id=13a~13d 管理端公告 CRUD
+    created_ann = run_test(
+        host, port,
+        {"id": "13a", "cmd": "announcement.create", "token": admin_token,
+         "data": {"title": "自动化测试公告", "content": "测试正文", "is_active": True}},
+        "announcement.create",
+    )
+    run_test(
+        host, port,
+        {"id": "13b", "cmd": "announcement.admin.list", "token": admin_token, "data": {}},
+        "announcement.admin.list",
+    )
+    run_test(
+        host, port,
+        {"id": "13c", "cmd": "announcement.update", "token": admin_token,
+         "data": {"title": "自动化测试公告-改", "content": "更新正文", "is_active": True}},
+        "announcement.update", expect_ok=False,
+    )
+    ann_list = run_test(
+        host, port,
+        {"id": "13b2", "cmd": "announcement.admin.list", "token": admin_token, "data": {}},
+        "announcement.admin.list after create",
+    )
+    ann_id = None
+    for row in ann_list["data"]["items"]:
+        if row.get("title") == "自动化测试公告":
+            ann_id = row["id"]
+            break
+    if ann_id is None:
+        raise RuntimeError("announcement.create not found in admin list")
+    run_test(
+        host, port,
+        {"id": "13c2", "cmd": "announcement.update", "token": admin_token,
+         "data": {"id": ann_id, "title": "自动化测试公告-改", "content": "更新正文"}},
+        "announcement.update",
+    )
+    ann_user = run_test(
+        host, port,
+        {"id": "13d", "cmd": "announcement.list", "token": token, "data": {}},
+        "announcement.list after create",
+    )
+    if len(ann_user["data"]["items"]) != user_ann_count + 1:
+        raise RuntimeError("user announcement.list should include new active announcement")
+    run_test(
+        host, port,
+        {"id": "13e", "cmd": "announcement.delete", "token": admin_token,
+         "data": {"id": ann_id}},
+        "announcement.delete",
     )
 
     # ===== §6 订单检查 + 充电全流程 =====

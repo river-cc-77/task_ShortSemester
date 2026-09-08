@@ -1,6 +1,4 @@
-#include "mainwindow.h"
-#include "ui_mainwindow.h"
-#include "apiclient.h"
+#include "announcementmanagedialog.h"
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QMessageBox>
@@ -14,6 +12,7 @@
 #include <QVector>
 #include <QLabel>
 #include <QFrame>
+#include <QBrush>
 
 namespace {
 
@@ -170,6 +169,20 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
         ui->btnLog->setProperty("selected", true);
         refreshBtnStyle(ui->btnLog);
         ui->stackedWidget->setCurrentIndex(4);
+    });
+
+    m_btnAnnouncement = new QPushButton(QStringLiteral("公告管理"), ui->sideBarWidget);
+    m_btnAnnouncement->setSizePolicy(ui->btnLog->sizePolicy());
+    m_btnAnnouncement->setCursor(Qt::PointingHandCursor);
+    const int logIndex = ui->verticalLayout->indexOf(ui->btnLog);
+    if (logIndex >= 0) {
+        ui->verticalLayout->insertWidget(logIndex, m_btnAnnouncement);
+    } else {
+        ui->verticalLayout->addWidget(m_btnAnnouncement);
+    }
+    connect(m_btnAnnouncement, &QPushButton::clicked, this, [this]() {
+        AnnouncementManageDialog dlg(m_api, this);
+        dlg.exec();
     });
 
     // ========= 营收趋势页面 index=5 =========
@@ -389,7 +402,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
         QStringLiteral("地址"),
         QStringLiteral("电价"),
         QStringLiteral("电桩数"),
-        QStringLiteral("闲置桩"),
+        QStringLiteral("闲置桩(预警)"),
         QStringLiteral("可用率"),
         QStringLiteral("创建时间"),
         QStringLiteral("操作"),
@@ -1293,6 +1306,22 @@ void MainWindow::reloadStationList()
     }
 
     m_stationItems = resp.value(QStringLiteral("data")).toObject().value(QStringLiteral("items")).toArray();
+    m_forecastMinIdle.clear();
+    const QJsonObject fcResp = m_api->call(
+        QStringLiteral("forecast.list"), QJsonObject{{QStringLiteral("horizon"), QStringLiteral("1h")}});
+    if (fcResp.value(QStringLiteral("ok")).toBool()) {
+        const QJsonArray fcItems = fcResp.value(QStringLiteral("data")).toObject()
+                                       .value(QStringLiteral("items")).toArray();
+        for (const QJsonValue &fv : fcItems) {
+            const QJsonObject fo = fv.toObject();
+            const int sid = fo.value(QStringLiteral("station_id")).toInt();
+            const int predIdle = fo.value(QStringLiteral("predicted_idle_piles")).toInt();
+            if (!m_forecastMinIdle.contains(sid) || predIdle < m_forecastMinIdle[sid]) {
+                m_forecastMinIdle[sid] = predIdle;
+            }
+        }
+    }
+
     const QString keyword = ui->editStationKeyword->text().trimmed();
 
     for (const QJsonValue &value : m_stationItems) {
@@ -1324,7 +1353,29 @@ void MainWindow::addStationRow(const QJsonObject &obj)
     ui->tableStation->setItem(row, 2, mkReadOnly(obj.value(QStringLiteral("address")).toString()));
     ui->tableStation->setItem(row, 3, mkReadOnly(QString::number(obj.value(QStringLiteral("price")).toDouble(), 'f', 2)));
     ui->tableStation->setItem(row, 4, mkReadOnly(QString::number(obj.value(QStringLiteral("total_piles")).toInt())));
-    ui->tableStation->setItem(row, 5, mkReadOnly(QString::number(obj.value(QStringLiteral("idle_piles")).toInt())));
+
+    const int stationId = obj.value(QStringLiteral("id")).toInt();
+    const int idle = obj.value(QStringLiteral("idle_piles")).toInt();
+    const int total = obj.value(QStringLiteral("total_piles")).toInt();
+    const double idleRate = total > 0 ? idle / static_cast<double>(total) : 1.0;
+    const int predIdle = m_forecastMinIdle.value(stationId, idle);
+    const double predRate = total > 0 ? predIdle / static_cast<double>(total) : idleRate;
+    const bool loadWarn = total > 0 && (idleRate < 0.30 || predRate < 0.30);
+
+    QString idleText = QString::number(idle);
+    if (loadWarn) {
+        idleText += QStringLiteral(" ⚠");
+    }
+    auto *idleItem = mkReadOnly(idleText);
+    if (loadWarn) {
+        idleItem->setForeground(QBrush(QColor(QStringLiteral("#D93025"))));
+        idleItem->setToolTip(QStringLiteral(
+            "负荷预警：当前空闲率 %1%，预测(1h)空闲率 %2%，低于 30% 阈值")
+                                 .arg(idleRate * 100.0, 0, 'f', 0)
+                                 .arg(predRate * 100.0, 0, 'f', 0));
+    }
+    ui->tableStation->setItem(row, 5, idleItem);
+
     const double onlineRate = obj.value(QStringLiteral("online_rate")).toDouble();
     ui->tableStation->setItem(row, 6, mkReadOnly(QStringLiteral("%1%").arg(onlineRate * 100.0, 0, 'f', 1)));
     ui->tableStation->setItem(row, 7, mkReadOnly(obj.value(QStringLiteral("created_at")).toString()));
