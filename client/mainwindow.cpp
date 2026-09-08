@@ -591,35 +591,43 @@ QJsonObject MainWindow::geocodeByBaidu(const QString &address)
     url.setQuery(query);
 
     QNetworkRequest request(url);
-    QNetworkReply *reply = m_netMgr->get(request);
+    // 关键：加 Referer 头，绕过浏览器端 AK 的域名校验
+    request.setRawHeader("Referer", "https://lbsyun.baidu.com/");
 
-    // 用事件循环同步等待响应（最多8秒）
+    QNetworkReply *reply = m_netMgr->get(request);
     QEventLoop loop;
     connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    QTimer::singleShot(8000, &loop, &QEventLoop::quit);   // 超时兜底
+    QTimer::singleShot(8000, &loop, &QEventLoop::quit);
     loop.exec();
 
     QJsonObject result;
     if (reply->error() != QNetworkReply::NoError) {
-        qWarning() << "geocode error:" << reply->errorString();
+        qWarning() << "geocode network error:" << reply->errorString();
         reply->deleteLater();
         return result;
     }
     const QByteArray body = reply->readAll();
     reply->deleteLater();
 
+    // 打印百度返回的完整 JSON，方便调试（看应用程序输出面板）
+    qDebug() << "geocode response:" << body;
+
     const QJsonDocument doc = QJsonDocument::fromJson(body);
     if (!doc.isObject()) return result;
     const QJsonObject root = doc.object();
-    // 百度返回 status=0 表示成功
-    if (root.value(QStringLiteral("status")).toInt() != 0) return result;
-
+    const int status = root.value(QStringLiteral("status")).toInt();
+    if (status != 0) {
+        qWarning() << "geocode baidu status:" << status
+                   << "message:" << root.value(QStringLiteral("message")).toString();
+        return result;
+    }
     const QJsonObject location = root.value(QStringLiteral("result")).toObject()
                                      .value(QStringLiteral("location")).toObject();
     result["lat"] = location.value(QStringLiteral("lat")).toDouble();
     result["lng"] = location.value(QStringLiteral("lng")).toDouble();
     return result;
 }
+
 
 // 个人中心
 void MainWindow::onProfileCenter()
