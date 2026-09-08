@@ -1,7 +1,5 @@
 <RCC>
-    <qresource prefix="/res">
-        <file>resources/login_background.png</file>
-        <file>resources/mainwindow_background.png</file>
+    <qresource prefix="/">
+        <file alias="theme.qss">resources/theme.qss</file>
     </qresource>
-    <qresource prefix="/"/>
 </RCC>

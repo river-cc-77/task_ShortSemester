@@ -1,14 +1,13 @@
 #ifndef LOGINWINDOW_H
 #define LOGINWINDOW_H
 
-#include <QWidget>
 #include <QJsonObject>
+#include <QWidget>
 
 class ApiClient;
-
-namespace Ui {
-class LoginWindow;
-}
+class QLineEdit;
+class QPushButton;
+class QLabel;
 
 class LoginWindow : public QWidget
 {
@@ -16,19 +15,19 @@ class LoginWindow : public QWidget
 
 public:
     explicit LoginWindow(ApiClient *api, QWidget *parent = nullptr);
-    ~LoginWindow();
-protected:
-    void paintEvent(QPaintEvent *event) override;
+    ~LoginWindow() override;
+
 signals:
     void loginSucceeded(const QJsonObject &user);
 
 private slots:
-    void on_loginButton_clicked(); //点击登录按钮的槽函数
+    void onLoginClicked();
 
 private:
     ApiClient *m_api = nullptr;
-private:
-    Ui::LoginWindow *ui;
+    QLineEdit *m_phoneEdit = nullptr;
+    QPushButton *m_loginButton = nullptr;
+    QLabel *m_errorLabel = nullptr;
 };
 
 #endif // LOGINWINDOW_H

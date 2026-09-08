@@ -8,7 +8,6 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QWidget>
-#include <QPainter>
 #include <QDialog>
 #include <QTextEdit>
 #include <QComboBox>
@@ -28,257 +27,123 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     , m_user(user)
 {
     setWindowTitle(QStringLiteral("充电桩用户端"));
-    /*构建界面*/
-    auto *central = new QWidget(this);
-    m_userLabel = new QLabel(central);
+    setObjectName(QStringLiteral("MainWindow"));
+    setAttribute(Qt::WA_StyledBackground, true);
+    setFixedSize(390, 844);          // 模拟手机竖屏尺寸，锁定大小
+
+    // ================= 顶部卡片：欢迎语 + 导航按钮 =================
+    auto *headerCard = new QWidget(this);
+    headerCard->setObjectName(QStringLiteral("headerCard"));
+    headerCard->setAttribute(Qt::WA_StyledBackground, true);
+
+    m_userLabel = new QLabel(headerCard);
+    m_userLabel->setObjectName(QStringLiteral("userGreet"));
     updateUserHeaderLabel();
 
-    auto *locLabel = new QLabel(QStringLiteral("当前位置（模拟 GPS）："), central);
-    m_latEdit = new QLineEdit(QStringLiteral("22.5431"), central);
-    m_lngEdit = new QLineEdit(QStringLiteral("114.0579"), central);
-    m_latEdit->setPlaceholderText(QStringLiteral("纬度 lat"));
-    m_lngEdit->setPlaceholderText(QStringLiteral("经度 lng"));
+    m_profileButton = new QPushButton(QStringLiteral("个人中心"), headerCard);
+    m_orderButton = new QPushButton(QStringLiteral("订单历史"), headerCard);
+    m_favoriteButton = new QPushButton(QStringLiteral("我的收藏"), headerCard);
+    m_profileButton->setCursor(Qt::PointingHandCursor);
+    m_orderButton->setCursor(Qt::PointingHandCursor);
+    m_favoriteButton->setCursor(Qt::PointingHandCursor);
 
-    auto *locLayout = new QHBoxLayout;
-    auto *latLabel = new QLabel(QStringLiteral("lat"), central);
-    auto *lngLabel = new QLabel(QStringLiteral("lng"), central);
-    locLayout->addWidget(latLabel);
-    locLayout->addWidget(m_latEdit);
-    locLayout->addWidget(lngLabel);
-    locLayout->addWidget(m_lngEdit);
+    auto *navRow = new QHBoxLayout;
+    navRow->setSpacing(8);
+    navRow->addWidget(m_profileButton, 1);
+    navRow->addWidget(m_orderButton, 1);
+    navRow->addWidget(m_favoriteButton, 1);
 
-    // 区域下拉  地址输入  地理编码按钮
-    auto *regionLabel = new QLabel(QStringLiteral("选择区域："), central);
-    m_regionCombo = new QComboBox(central);
+    auto *headerLayout = new QVBoxLayout(headerCard);
+    headerLayout->setContentsMargins(16, 12, 16, 12);
+    headerLayout->setSpacing(8);
+    headerLayout->addWidget(m_userLabel);
+    headerLayout->addLayout(navRow);
+
+    // ================= 查找/定位卡片 =================
+    auto *searchCard = new QWidget(this);
+    searchCard->setObjectName(QStringLiteral("searchCard"));
+    searchCard->setAttribute(Qt::WA_StyledBackground, true);
+
+    auto *searchLayout = new QVBoxLayout(searchCard);
+    searchLayout->setContentsMargins(14, 12, 14, 12);
+    searchLayout->setSpacing(8);
+
+    // 当前位置（模拟 GPS）小标题
+    auto *sectionLabel = new QLabel(QStringLiteral("当前位置（模拟 GPS）"), searchCard);
+    sectionLabel->setObjectName(QStringLiteral("sectionTitle"));
+
+    // 经纬度（两列均分）
+    m_latEdit = new QLineEdit(QStringLiteral("22.5431"), searchCard);
+    m_lngEdit = new QLineEdit(QStringLiteral("114.0579"), searchCard);
+    m_latEdit->setObjectName(QStringLiteral("latEdit"));
+    m_lngEdit->setObjectName(QStringLiteral("lngEdit"));
+    m_latEdit->setPlaceholderText(QStringLiteral("纬度"));
+    m_lngEdit->setPlaceholderText(QStringLiteral("经度"));
+
+    auto *locRow = new QHBoxLayout;
+    locRow->setSpacing(6);
+    locRow->addWidget(new QLabel(QStringLiteral("lat"), searchCard));
+    locRow->addWidget(m_latEdit, 1);
+    locRow->addSpacing(8);
+    locRow->addWidget(new QLabel(QStringLiteral("lng"), searchCard));
+    locRow->addWidget(m_lngEdit, 1);
+
+    // 区域下拉（整行）
+    m_regionCombo = new QComboBox(searchCard);
     m_regionCombo->addItem(QStringLiteral("— 请选择 —"), QVariant());
-    m_regionCombo->addItem(QStringLiteral("北京 天安门"),   QVariantList{39.9042, 116.4074});
-    m_regionCombo->addItem(QStringLiteral("上海 外滩"),     QVariantList{31.2397, 121.4908});
-    m_regionCombo->addItem(QStringLiteral("深圳 福田"),     QVariantList{22.5431, 114.0579});
-    m_regionCombo->addItem(QStringLiteral("广州 天河"),     QVariantList{23.1291, 113.2644});
-    m_regionCombo->addItem(QStringLiteral("杭州 西湖"),     QVariantList{30.2741, 120.1551});
+    m_regionCombo->addItem(QStringLiteral("北京 天安门"), QVariantList{39.9042, 116.4074});
+    m_regionCombo->addItem(QStringLiteral("上海 外滩"), QVariantList{31.2397, 121.4908});
+    m_regionCombo->addItem(QStringLiteral("深圳 福田"), QVariantList{22.5431, 114.0579});
+    m_regionCombo->addItem(QStringLiteral("广州 天河"), QVariantList{23.1291, 113.2644});
+    m_regionCombo->addItem(QStringLiteral("杭州 西湖"), QVariantList{30.2741, 120.1551});
 
-    auto *addressLabel = new QLabel(QStringLiteral("或输入地址："), central);
-    m_addressEdit = new QLineEdit(central);
-    m_addressEdit->setPlaceholderText(QStringLiteral("例如：深圳市南山区科技园"));
-    m_geocodeButton = new QPushButton(QStringLiteral("地理编码"), central);
+    auto *regionRow = new QHBoxLayout;
+    regionRow->setSpacing(8);
+    regionRow->addWidget(new QLabel(QStringLiteral("选择区域"), searchCard));
+    regionRow->addWidget(m_regionCombo, 1);
 
-    auto *geoLayout = new QHBoxLayout;
-    geoLayout->addWidget(regionLabel);
-    geoLayout->addWidget(m_regionCombo);
-    geoLayout->addWidget(addressLabel);
-    geoLayout->addWidget(m_addressEdit, 1);   // 地址框占剩余空间
-    geoLayout->addWidget(m_geocodeButton);
+    // 地址输入 + 地理编码
+    m_addressEdit = new QLineEdit(searchCard);
+    m_addressEdit->setPlaceholderText(QStringLiteral("输入地址，如：深圳市南山区科技园"));
+    m_geocodeButton = new QPushButton(QStringLiteral("地理编码"), searchCard);
+    m_geocodeButton->setCursor(Qt::PointingHandCursor);
 
-    m_refreshButton = new QPushButton(QStringLiteral("刷新附近充电站"), central);
-    m_refreshButton->setStyleSheet(R"(
-        QPushButton{
-            background-color: rgba(255, 255, 255, 200);   /* 浅白底 */
-            color: #1a5fb4;                                /* 深蓝色文字 */
-            border: 1px solid rgba(26, 95, 180, 150);
-            border-radius: 6px;
-            padding: 10px 20px;
-            font-size: 14px;
-            font-weight: bold;
-        }
-        /* 鼠标悬浮：背景变蓝，文字变白 */
-        QPushButton:hover{
-            background-color: rgba(26, 95, 180, 220);
-            color: white;
-            border: 1px solid rgba(26, 95, 180, 255);
-        }
-        /* 鼠标按下：颜色更深，有按压感 */
-        QPushButton:pressed{
-            background-color: rgba(20, 75, 140, 240);
-            color: white;
-            padding-top: 11px;   /* 文字轻微下移1px，模拟按下效果 */
-            padding-bottom: 9px;
-        }
-    )");
-    m_stationList = new QListWidget(central);
-    m_statusLabel = new QLabel(central);
+    auto *addrRow = new QHBoxLayout;
+    addrRow->setSpacing(8);
+    addrRow->addWidget(m_addressEdit, 1);
+    addrRow->addWidget(m_geocodeButton);
 
+    // 刷新（全宽主按钮）
+    m_refreshButton = new QPushButton(QStringLiteral("刷新附近充电站"), searchCard);
+    m_refreshButton->setProperty("class", "primary");
+    m_refreshButton->setMinimumHeight(42);
+    m_refreshButton->setCursor(Qt::PointingHandCursor);
+
+    searchLayout->addWidget(sectionLabel);
+    searchLayout->addLayout(locRow);
+    searchLayout->addLayout(regionRow);
+    searchLayout->addLayout(addrRow);
+    searchLayout->addWidget(m_refreshButton);
+
+    // ================= 站点列表 + 状态行 =================
+    m_stationList = new QListWidget(this);
+    m_statusLabel = new QLabel(this);
+    m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
+
+    auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
-    // 欢迎语 + 个人中心 + 订单历史 + 我的收藏
-    m_profileButton = new QPushButton(QStringLiteral("个人中心"), central);
-    m_profileButton->setStyleSheet(m_refreshButton->styleSheet());  // 复用刷新按钮样式
-    m_orderButton = new QPushButton(QStringLiteral("订单历史"), central);
-    m_orderButton->setStyleSheet(m_refreshButton->styleSheet());
-    m_favoriteButton = new QPushButton(QStringLiteral("我的收藏"), central);
-    m_favoriteButton->setStyleSheet(m_refreshButton->styleSheet());
-
-    auto *topLayout = new QHBoxLayout;
-    topLayout->addWidget(m_userLabel);
-    topLayout->addStretch();
-    topLayout->addWidget(m_profileButton);
-    topLayout->addWidget(m_orderButton);
-    topLayout->addWidget(m_favoriteButton);
-    layout->addLayout(topLayout);
-    layout->addWidget(locLabel);
-    layout->addLayout(locLayout);
-    layout->addLayout(geoLayout);
-    layout->addWidget(m_refreshButton);
-    layout->addWidget(m_stationList);
+    layout->setContentsMargins(12, 10, 12, 8);
+    layout->setSpacing(10);
+    layout->addWidget(headerCard);
+    layout->addWidget(searchCard);
+    layout->addWidget(m_stationList, 1);
     layout->addWidget(m_statusLabel);
-    central->setLayout(layout);
-    // 让 centralWidget 背景透明，这样 QMainWindow 的 paintEvent 背景图才能透出来
-    central->setStyleSheet("background: transparent;");
     setCentralWidget(central);
 
-    // 欢迎标签：大字号加粗
-    m_userLabel->setStyleSheet(R"(
-        QLabel{
-            color: #ffffff;            /* 深蓝色 */
-            font-size: 17px;
-            font-weight: bold;
-            padding: 4px 0px;
-        }
-    )");
-
-    // 说明标签（当前位置、lat/lng、选择区域、输入地址） 白色
-    const QString whiteLabel = QStringLiteral(
-        "color: #ffffff; font-size: 13px; padding: 2px 0px;");
-    locLabel->setStyleSheet(whiteLabel);
-    latLabel->setStyleSheet(whiteLabel);
-    lngLabel->setStyleSheet(whiteLabel);
-    regionLabel->setStyleSheet(whiteLabel);
-    addressLabel->setStyleSheet(whiteLabel);
-
-    // 经纬度输入框：半透明白底
-    m_latEdit->setStyleSheet(R"(
-        QLineEdit{
-            background-color: rgba(255, 255, 255, 200);
-            color: #222222;
-            border: 1px solid rgba(26, 95, 180, 120);
-            border-radius: 4px;
-            padding: 6px 8px;
-            font-size: 13px;
-        }
-        QLineEdit:focus{
-            background-color: rgba(255, 255, 255, 240);
-            border: 1px solid rgba(26, 95, 180, 200);
-        }
-    )");
-    m_lngEdit->setStyleSheet(m_latEdit->styleSheet());  // 复用同样式
-
-    // 充电站列表：半透明白板
-    m_stationList->setStyleSheet(R"(
-        QListWidget{
-            background-color: rgba(255, 255, 255, 185);
-            color: #222222;
-            border: 1px solid rgba(26, 95, 180, 100);
-            border-radius: 6px;
-            padding: 4px;
-            font-size: 13px;
-            outline: none;             /* 去掉选中时的虚线框 */
-        }
-        QListWidget::item{
-            padding: 8px 6px;
-            border-bottom: 1px solid rgba(0, 0, 0, 30);
-        }
-        QListWidget::item:hover{
-            background-color: rgba(26, 95, 180, 40);   /* 鼠标悬停行：淡蓝高亮 */
-        }
-        QListWidget::item:selected{
-            background-color: rgba(26, 95, 180, 210);  /* 选中行：深蓝 */
-            color: white;
-        }
-    )");
-
-    // 底部状态标签
-    m_statusLabel->setStyleSheet(R"(
-        QLabel{
-            color: #555555;            /* 中灰色 */
-            font-size: 12px;
-            font-style: italic;
-            padding: 4px 0px;
-        }
-    )");
-
-    // "选择区域：" 和 "或输入地址：" 两个提示标签：白色字
-    regionLabel->setStyleSheet(R"(
-        QLabel{
-            color: #ffffff;
-            font-size: 13px;
-            padding: 2px 0px;
-        }
-    )");
-    addressLabel->setStyleSheet(regionLabel->styleSheet());  // 复用同样式
-
-    // ===== 地址输入框：毛玻璃白色（半透明白底深字）=====
-    m_addressEdit->setStyleSheet(R"(
-        QLineEdit{
-            background-color: rgba(255, 255, 255, 180);
-            color: #222222;
-            border: 1px solid rgba(255, 255, 255, 120);
-            border-radius: 4px;
-            padding: 6px 8px;
-            font-size: 13px;
-        }
-        QLineEdit:focus{
-            background-color: rgba(255, 255, 255, 230);
-            border: 1px solid rgba(255, 255, 255, 180);
-        }
-    )");
-
-    // 区域下拉框：毛玻璃白色（未点击时半透明白底）
-    m_regionCombo->setStyleSheet(R"(
-        /* 下拉框本体（未展开状态） */
-        QComboBox{
-            background-color: rgba(255, 255, 255, 180);   /* 半透明白底，毛玻璃感 */
-            color: #222222;                              /* 深色字，在白底上清晰 */
-            border: 1px solid rgba(255, 255, 255, 120);
-            border-radius: 4px;
-            padding: 6px 8px;
-            font-size: 13px;
-        }
-        /* 鼠标悬停下拉框 */
-        QComboBox:hover{
-            background-color: rgba(255, 255, 255, 220);
-            border: 1px solid rgba(255, 255, 255, 180);
-        }
-        /* 下拉框右侧的下拉箭头按钮区域 */
-        QComboBox::drop-down{
-            border: none;
-            width: 24px;
-        }
-        /* 下拉箭头图标 */
-        QComboBox::down-arrow{
-            image: none;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 6px solid #1a5fb4;   /* 深蓝色小三角箭头 */
-            width: 0;
-            height: 0;
-            margin-right: 8px;
-        }
-        /* 展开后的下拉列表（弹出菜单） */
-        QComboBox QAbstractItemView{
-            background-color: rgba(255, 255, 255, 240);   /* 弹出列表接近不透明白 */
-            color: #222222;
-            border: 1px solid rgba(26, 95, 180, 150);
-            border-radius: 4px;
-            padding: 4px;
-            outline: none;
-        }
-        QComboBox QAbstractItemView::item{
-            padding: 6px 8px;
-            min-height: 24px;
-        }
-        QComboBox QAbstractItemView::item:hover{
-            background-color: rgba(26, 95, 180, 50);
-        }
-        QComboBox QAbstractItemView::item:selected{
-            background-color: rgba(26, 95, 180, 210);
-            color: white;
-        }
-    )");
-    m_geocodeButton->setStyleSheet(m_refreshButton->styleSheet());
-
-    resize(1500, 1125);
-
+    // ================= 信号连接（保持不变） =================
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshStations);
-    connect(m_stationList,&QListWidget::itemClicked,this,&MainWindow::onStationItemClicked);// 绑定站点列表项点击信号和对应的点击事件
-    m_netMgr = new QNetworkAccessManager(this); //初始化网络管理器
+    connect(m_stationList, &QListWidget::itemClicked, this, &MainWindow::onStationItemClicked);
+    m_netMgr = new QNetworkAccessManager(this);
     connect(m_regionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::onRegionChanged);
     connect(m_geocodeButton, &QPushButton::clicked, this, &MainWindow::onGeocodeAddress);
@@ -290,6 +155,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
 
     QTimer::singleShot(0, this, [this]() { checkOpenOrder(false); });
 }
+
 
 void MainWindow::onRefreshStations()
 {
@@ -339,29 +205,6 @@ void MainWindow::loadStations()
         m_stationList->addItem(listItem);
     }
     m_statusLabel->setText(QStringLiteral("共 %1 个充电站（按距离排序）").arg(items.size()));
-}
-
-//重写paintEvent，设置背景
-void MainWindow::paintEvent(QPaintEvent *event)
-{
-    QMainWindow::paintEvent(event);
-
-    QPainter painter(this);
-    QPixmap bgPix(":/res/resources/mainwindow_background.png");
-
-    if (bgPix.isNull()) {
-        qDebug() << "MainWindow背景图加载失败，检查路径";
-        return;
-    }
-
-    // 拉伸铺满整个窗口
-    QPixmap scaledBg = bgPix.scaled(this->size(),
-                                    Qt::IgnoreAspectRatio,
-                                    Qt::SmoothTransformation);
-    painter.drawPixmap(rect(), scaledBg);
-    // 盖一层半透明白色遮罩，把深色背景压淡
-    // alpha 越大背景越亮、越淡；alpha 越小背景越深、越透
-    painter.fillRect(rect(), QColor(255, 255, 255, 0));  // 140≈55%透明度，可调
 }
 
 void MainWindow::onStationItemClicked(QListWidgetItem *item)

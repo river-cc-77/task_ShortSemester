@@ -28,9 +28,6 @@ private slots:
     void onProfileCenter();   // 个人中心
     void onOrderHistory();   // 订单历史
     void onFavoriteList();   // 收藏列表
-protected:
-    void paintEvent(QPaintEvent *event) override;
-
 private:
     void loadStations();
     void showStationDetail(int stationId); // 弹出站点详情对话框

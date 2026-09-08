@@ -16,8 +16,5 @@ HEADERS += \
     loginwindow.h \
     mainwindow.h
 
-FORMS += \
-    loginwindow.ui
-
 RESOURCES += \
     resources.qrc
