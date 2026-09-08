@@ -1,22 +1,26 @@
 #include "mapnavigationdialog.h"
 #include "uiutil.h"
 
-#include <QDesktopServices>
 #include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
-#include <QMessageBox>
+#include <QListWidget>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QPixmap>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QStackedWidget>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QtMath>
 
 namespace {
-
-QString encodeBaiduParam(const QString &raw)
-{
-    return QString::fromUtf8(QUrl::toPercentEncoding(raw, "|:,;"));
-}
 
 QString guessRegionFromAddress(const QString &address)
 {
@@ -29,32 +33,6 @@ QString guessRegionFromAddress(const QString &address)
         city = city.right(3);
     }
     return city;
-}
-
-QString buildBaiduDirectionUrl(double originLat, double originLng, const QString &originName,
-                               double destLat, double destLng, const QString &destName,
-                               MapNavigationDialog::NavMode mode, const QString &region)
-{
-    const QString originVal = QStringLiteral("name:%1|latlng:%2,%3")
-                                  .arg(originName)
-                                  .arg(originLat, 0, 'f', 6)
-                                  .arg(originLng, 0, 'f', 6);
-    const QString destVal = QStringLiteral("name:%1|latlng:%2,%3")
-                                .arg(destName)
-                                .arg(destLat, 0, 'f', 6)
-                                .arg(destLng, 0, 'f', 6);
-    const QString modeStr = mode == MapNavigationDialog::NavMode::Walking
-                                ? QStringLiteral("walking")
-                                : QStringLiteral("driving");
-
-    QString url = QStringLiteral("https://api.map.baidu.com/direction?"
-                                 "origin=%1&destination=%2&mode=%3&output=html"
-                                 "&coord_type=gcj02&src=webapp.chargeClient.navigation")
-                      .arg(encodeBaiduParam(originVal), encodeBaiduParam(destVal), modeStr);
-    if (!region.isEmpty()) {
-        url += QStringLiteral("&region=%1").arg(encodeBaiduParam(region));
-    }
-    return url;
 }
 
 QWidget *makeCard(QWidget *parent)
@@ -70,6 +48,7 @@ QWidget *makeCard(QWidget *parent)
 MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
                                          double originLat, double originLng,
                                          const QString &destName, double destLat, double destLng,
+                                         const QString &baiduAk,
                                          const QString &destAddress,
                                          QWidget *parent)
     : QDialog(parent)
@@ -79,21 +58,27 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     , m_destName(destName)
     , m_destLat(destLat)
     , m_destLng(destLng)
+    , m_baiduAk(baiduAk)
     , m_region(guessRegionFromAddress(destAddress))
 {
     setObjectName(QStringLiteral("navDialog"));
     setWindowTitle(QStringLiteral("地图导航"));
     setAttribute(Qt::WA_StyledBackground, true);
 
-    auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(14, 14, 14, 14);
-    layout->setSpacing(10);
+    m_net = new QNetworkAccessManager(this);
+    m_stack = new QStackedWidget(this);
 
-    auto *titleLabel = new QLabel(QStringLiteral("地图导航"), this);
+    // ---------- 页 1：起终点 + 出行方式 ----------
+    m_setupPage = new QWidget(this);
+    auto *setupLay = new QVBoxLayout(m_setupPage);
+    setupLay->setContentsMargins(14, 14, 14, 14);
+    setupLay->setSpacing(10);
+
+    auto *titleLabel = new QLabel(QStringLiteral("地图导航"), m_setupPage);
     titleLabel->setObjectName(QStringLiteral("userGreet"));
-    layout->addWidget(titleLabel);
+    setupLay->addWidget(titleLabel);
 
-    auto *routeCard = makeCard(this);
+    auto *routeCard = makeCard(m_setupPage);
     auto *routeLay = new QVBoxLayout(routeCard);
     routeLay->setContentsMargins(12, 10, 12, 10);
     routeLay->setSpacing(8);
@@ -118,9 +103,9 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     routeLay->addWidget(routeTitle);
     routeLay->addWidget(m_originLabel);
     routeLay->addWidget(m_destLabel);
-    layout->addWidget(routeCard);
+    setupLay->addWidget(routeCard);
 
-    auto *modeCard = makeCard(this);
+    auto *modeCard = makeCard(m_setupPage);
     auto *modeLay = new QVBoxLayout(modeCard);
     modeLay->setContentsMargins(12, 10, 12, 10);
     modeLay->setSpacing(8);
@@ -138,31 +123,73 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
 
     modeLay->addWidget(modeTitle);
     modeLay->addLayout(modeRow);
-    layout->addWidget(modeCard);
+    setupLay->addWidget(modeCard);
 
     m_statusLabel = new QLabel(
         QStringLiteral("起终点已就绪，选择方式后点击「开始导航」。"),
-        this);
+        m_setupPage);
     m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
     m_statusLabel->setWordWrap(true);
-    layout->addWidget(m_statusLabel);
+    setupLay->addWidget(m_statusLabel);
+    setupLay->addStretch();
 
-    layout->addStretch();
-
-    m_startBtn = new QPushButton(QStringLiteral("开始导航"), this);
+    m_startBtn = new QPushButton(QStringLiteral("开始导航"), m_setupPage);
     m_startBtn->setProperty("class", "primary");
     m_startBtn->setCursor(Qt::PointingHandCursor);
     m_startBtn->setMinimumHeight(42);
 
-    auto *closeBtn = new QPushButton(QStringLiteral("返回"), this);
+    auto *closeBtn = new QPushButton(QStringLiteral("返回"), m_setupPage);
     closeBtn->setCursor(Qt::PointingHandCursor);
     closeBtn->setMinimumHeight(36);
 
-    layout->addWidget(m_startBtn);
-    layout->addWidget(closeBtn);
+    setupLay->addWidget(m_startBtn);
+    setupLay->addWidget(closeBtn);
 
     connect(m_startBtn, &QPushButton::clicked, this, &MapNavigationDialog::onStartNavigation);
     connect(closeBtn, &QPushButton::clicked, this, &QDialog::reject);
+
+    // ---------- 页 2：应用内路线（地图 + 分步指引） ----------
+    m_navPage = new QWidget(this);
+    auto *navLay = new QVBoxLayout(m_navPage);
+    navLay->setContentsMargins(14, 14, 14, 14);
+    navLay->setSpacing(8);
+
+    auto *navTitle = new QLabel(QStringLiteral("导航中"), m_navPage);
+    navTitle->setObjectName(QStringLiteral("userGreet"));
+    navLay->addWidget(navTitle);
+
+    m_summaryLabel = new QLabel(m_navPage);
+    m_summaryLabel->setWordWrap(true);
+    m_summaryLabel->setObjectName(QStringLiteral("sectionTitle"));
+    navLay->addWidget(m_summaryLabel);
+
+    m_mapLabel = new QLabel(m_navPage);
+    m_mapLabel->setObjectName(QStringLiteral("navMapPreview"));
+    m_mapLabel->setAlignment(Qt::AlignCenter);
+    m_mapLabel->setMinimumHeight(160);
+    m_mapLabel->setScaledContents(true);
+    navLay->addWidget(m_mapLabel);
+
+    auto *stepsTitle = new QLabel(QStringLiteral("路线指引"), m_navPage);
+    stepsTitle->setObjectName(QStringLiteral("sectionTitle"));
+    navLay->addWidget(stepsTitle);
+
+    m_stepsList = new QListWidget(m_navPage);
+    m_stepsList->setObjectName(QStringLiteral("navStepsList"));
+    navLay->addWidget(m_stepsList, 1);
+
+    auto *backBtn = new QPushButton(QStringLiteral("返回"), m_navPage);
+    backBtn->setCursor(Qt::PointingHandCursor);
+    backBtn->setMinimumHeight(36);
+    navLay->addWidget(backBtn);
+    connect(backBtn, &QPushButton::clicked, this, &MapNavigationDialog::onBackToSetup);
+
+    m_stack->addWidget(m_setupPage);
+    m_stack->addWidget(m_navPage);
+
+    auto *rootLay = new QVBoxLayout(this);
+    rootLay->setContentsMargins(0, 0, 0, 0);
+    rootLay->addWidget(m_stack);
 
     fitDialogInParent(this, parent, 460);
 }
@@ -172,21 +199,173 @@ MapNavigationDialog::NavMode MapNavigationDialog::selectedMode() const
     return m_walkingRadio->isChecked() ? NavMode::Walking : NavMode::Driving;
 }
 
-QString MapNavigationDialog::buildBaiduDirectionUrl(NavMode mode) const
+QString MapNavigationDialog::directionLiteUrl(NavMode mode) const
 {
-    return ::buildBaiduDirectionUrl(m_originLat, m_originLng, m_originDesc,
-                                    m_destLat, m_destLng, m_destName,
-                                    mode, m_region);
+    const QString apiPath = mode == NavMode::Walking
+                                ? QStringLiteral("walking")
+                                : QStringLiteral("driving");
+    QUrl url(QStringLiteral("https://api.map.baidu.com/directionlite/v1/") + apiPath);
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("origin"),
+                       QStringLiteral("%1,%2")
+                           .arg(m_originLat, 0, 'f', 6)
+                           .arg(m_originLng, 0, 'f', 6));
+    query.addQueryItem(QStringLiteral("destination"),
+                       QStringLiteral("%1,%2")
+                           .arg(m_destLat, 0, 'f', 6)
+                           .arg(m_destLng, 0, 'f', 6));
+    query.addQueryItem(QStringLiteral("coord_type"), QStringLiteral("gcj02"));
+    query.addQueryItem(QStringLiteral("ak"), m_baiduAk);
+    url.setQuery(query);
+    return url.toString(QUrl::FullyEncoded);
 }
 
 void MapNavigationDialog::onStartNavigation()
 {
-    const QString navUrl = buildBaiduDirectionUrl(selectedMode());
-    if (!QDesktopServices::openUrl(QUrl(navUrl))) {
-        m_statusLabel->setText(QStringLiteral("导航加载失败，请检查网络"));
-        QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("导航加载失败，请检查网络"));
+    if (m_baiduAk.trimmed().isEmpty()) {
+        m_statusLabel->setText(QStringLiteral("未配置百度地图 AK，无法规划路线"));
         return;
     }
-    accept();
+
+    m_statusLabel->setText(QStringLiteral("正在规划路线…"));
+    m_startBtn->setEnabled(false);
+    fetchRoute();
+}
+
+void MapNavigationDialog::fetchRoute()
+{
+    const QUrl url(directionLiteUrl(selectedMode()));
+    QNetworkRequest request(url);
+    request.setRawHeader("Referer", "https://lbsyun.baidu.com/");
+
+    QNetworkReply *reply = m_net->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        m_startBtn->setEnabled(true);
+
+        if (reply->error() != QNetworkReply::NoError) {
+            m_statusLabel->setText(QStringLiteral("导航加载失败，请检查网络"));
+            return;
+        }
+
+        const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        if (!doc.isObject()) {
+            m_statusLabel->setText(QStringLiteral("导航加载失败，请检查网络"));
+            return;
+        }
+
+        const QJsonObject root = doc.object();
+        if (root.value(QStringLiteral("status")).toInt() != 0) {
+            m_statusLabel->setText(QStringLiteral("导航加载失败，请检查网络"));
+            return;
+        }
+
+        const QJsonArray routes = root.value(QStringLiteral("result")).toObject()
+                                      .value(QStringLiteral("routes")).toArray();
+        if (routes.isEmpty()) {
+            m_statusLabel->setText(QStringLiteral("未找到可用路线"));
+            return;
+        }
+
+        showNavigationResult(routes.first().toObject());
+    });
+}
+
+void MapNavigationDialog::showNavigationResult(const QJsonObject &route)
+{
+    const int distM = route.value(QStringLiteral("distance")).toInt();
+    const int durS = route.value(QStringLiteral("duration")).toInt();
+    const QJsonArray steps = route.value(QStringLiteral("steps")).toArray();
+
+    const QString modeText = selectedMode() == NavMode::Walking
+                                 ? QStringLiteral("步行")
+                                 : QStringLiteral("驾车");
+    m_summaryLabel->setText(
+        QStringLiteral("%1 · 全程约 %2 公里 · 预计 %3 分钟")
+            .arg(modeText)
+            .arg(distM / 1000.0, 0, 'f', 1)
+            .arg(qMax(1, static_cast<int>(qCeil(durS / 60.0)))));
+
+    m_stepsList->clear();
+    int idx = 1;
+    for (const QJsonValue &value : steps) {
+        const QJsonObject step = value.toObject();
+        const QString instruction = step.value(QStringLiteral("instruction")).toString();
+        const int stepDist = step.value(QStringLiteral("distance")).toInt();
+        m_stepsList->addItem(QStringLiteral("%1. %2（%3 米）")
+                                 .arg(idx++)
+                                 .arg(instruction)
+                                 .arg(stepDist));
+    }
+
+    m_mapLabel->clear();
+    m_mapLabel->setText(QStringLiteral("路线地图加载中…"));
+    loadStaticMap(steps);
+
+    m_stack->setCurrentWidget(m_navPage);
+    fitDialogInParent(this, parentWidget(), 760);
+}
+
+void MapNavigationDialog::loadStaticMap(const QJsonArray &steps)
+{
+    if (m_baiduAk.trimmed().isEmpty()) {
+        m_mapLabel->setText(QStringLiteral("（地图预览不可用）"));
+        return;
+    }
+
+    QStringList pathPoints;
+    for (const QJsonValue &value : steps) {
+        const QString path = value.toObject().value(QStringLiteral("path")).toString();
+        for (const QString &pt : path.split(QLatin1Char(';'))) {
+            const QString trimmed = pt.trimmed();
+            if (!trimmed.isEmpty()) {
+                pathPoints << trimmed;
+            }
+        }
+    }
+    if (pathPoints.isEmpty()) {
+        pathPoints << QStringLiteral("%1,%2").arg(m_originLng, 0, 'f', 6).arg(m_originLat, 0, 'f', 6)
+                   << QStringLiteral("%1,%2").arg(m_destLng, 0, 'f', 6).arg(m_destLat, 0, 'f', 6);
+    }
+
+    const double centerLng = (m_originLng + m_destLng) / 2.0;
+    const double centerLat = (m_originLat + m_destLat) / 2.0;
+    const QString pathsParam = QStringLiteral("0x2B6BFF,4,1,") + pathPoints.join(QLatin1Char('|'));
+
+    QUrl url(QStringLiteral("https://api.map.baidu.com/staticimage/v2"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("ak"), m_baiduAk);
+    query.addQueryItem(QStringLiteral("center"),
+                       QStringLiteral("%1,%2").arg(centerLng, 0, 'f', 6).arg(centerLat, 0, 'f', 6));
+    query.addQueryItem(QStringLiteral("width"), QStringLiteral("360"));
+    query.addQueryItem(QStringLiteral("height"), QStringLiteral("200"));
+    query.addQueryItem(QStringLiteral("zoom"), QStringLiteral("13"));
+    query.addQueryItem(QStringLiteral("paths"), pathsParam);
+    query.addQueryItem(QStringLiteral("coordtype"), QStringLiteral("gcj02"));
+    url.setQuery(query);
+
+    QNetworkRequest request(url);
+    request.setRawHeader("Referer", "https://lbsyun.baidu.com/");
+
+    QNetworkReply *reply = m_net->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            m_mapLabel->setText(QStringLiteral("（地图预览加载失败）"));
+            return;
+        }
+        QPixmap pix;
+        if (!pix.loadFromData(reply->readAll())) {
+            m_mapLabel->setText(QStringLiteral("（地图预览加载失败）"));
+            return;
+        }
+        m_mapLabel->setPixmap(pix);
+    });
+}
+
+void MapNavigationDialog::onBackToSetup()
+{
+    m_stack->setCurrentWidget(m_setupPage);
+    m_statusLabel->setText(QStringLiteral("起终点已就绪，选择方式后点击「开始导航」。"));
+    fitDialogInParent(this, parentWidget(), 460);
 }

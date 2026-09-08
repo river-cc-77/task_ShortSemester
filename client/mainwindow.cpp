@@ -1102,7 +1102,7 @@ void MainWindow::showMapNavigation(double destLat, double destLng, const QString
     }
 
     MapNavigationDialog navDlg(originDesc, originLat, originLng,
-                               destName, destLat, destLng, destAddress, this);
+                               destName, destLat, destLng, m_baiduAk, destAddress, this);
     navDlg.exec();
 }
 

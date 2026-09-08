@@ -380,3 +380,16 @@ QDialog#navDialog QPushButton[class="primary"] {
     font-size: 11pt;
     min-height: 42px;
 }
+
+QLabel#navMapPreview {
+    background-color: #FFFFFF;
+    border: 1px solid #E3EAF4;
+    border-radius: 10px;
+}
+
+QListWidget#navStepsList {
+    background-color: #FFFFFF;
+    border: 1px solid #E3EAF4;
+    border-radius: 10px;
+    padding: 4px;
+}
