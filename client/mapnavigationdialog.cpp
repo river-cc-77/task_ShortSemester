@@ -239,7 +239,7 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
         setupLay->addWidget(new QLabel(QStringLiteral("将使用应用内地图显示路线。"), m_setupPage));
     } else {
         setupLay->addWidget(new QLabel(
-            QStringLiteral("未检测到 Qt WebEngine 运行时，将使用文字指引（可安装 libqt6webengine6 启用地图）。"),
+            QStringLiteral("未检测到 Qt WebEngine 运行时，将使用文字指引（可安装 libqt6webenginecore6-bin 启用地图）。"),
             m_setupPage));
     }
 #else

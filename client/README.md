@@ -12,7 +12,8 @@
 ## 构建（Ubuntu 22.04）
 
 ```bash
-sudo apt install -y qt6-base-dev qt6-webengine-dev libqt6webengine6
+sudo apt install -y qt6-base-dev qt6-webengine-dev \
+  libqt6webenginecore6 libqt6webenginewidgets6 libqt6webenginecore6-bin
 
 cd client
 qmake6 charge-client.pro
