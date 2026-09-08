@@ -13,7 +13,8 @@ LoginWindow::LoginWindow(ApiClient *api, QWidget *parent)
     setWindowTitle(QStringLiteral("充电桩用户端"));
     setObjectName(QStringLiteral("loginRoot"));
     setAttribute(Qt::WA_StyledBackground, true);
-    setFixedSize(390, 844);          // 模拟手机竖屏尺寸，锁定大小
+    resize(390, 844);                // 默认模拟手机竖屏尺寸，允许拉伸自适应不同屏幕
+    setMinimumSize(320, 568);
 
     // ========== 标题区 ==========
     auto *title = new QLabel(QStringLiteral("电动汽车充电桩"), this);

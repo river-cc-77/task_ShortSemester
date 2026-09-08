@@ -20,6 +20,153 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDoubleValidator>
+#include <QStyledItemDelegate>
+#include <QTextDocument>
+#include <QAbstractTextDocumentLayout>
+#include <QAbstractItemView>
+#include <QPainter>
+#include <QPen>
+#include <QPalette>
+#include <QResizeEvent>
+#include <QStyleOptionViewItem>
+
+// ================= 列表条目自适应换行 + 行距（站点/电桩/订单/收藏列表复用） =================
+namespace {
+
+// 条目内文本的留白/行距（像素）
+constexpr int kItemTextLeft   = 14;
+constexpr int kItemTextRight  = 14;
+constexpr int kItemTextTop    = 10;
+constexpr int kItemTextBottom = 12;   // 文本底到行底的留白（兼作与下一条的分隔感）
+constexpr int kScrollbarAllow = 10;   // 预留滚动条宽度，避免测量与绘制宽度不一致裁字
+
+class WrapItemDelegate : public QStyledItemDelegate
+{
+public:
+    explicit WrapItemDelegate(QObject *parent = nullptr)
+        : QStyledItemDelegate(parent) {}
+
+    QSize sizeHint(const QStyleOptionViewItem &option,
+                   const QModelIndex &index) const override
+    {
+        const auto *view = qobject_cast<const QAbstractItemView *>(parent());
+        int avail = (view ? view->viewport()->width() : 320)
+                    - kItemTextLeft - kItemTextRight - kScrollbarAllow;
+        if (option.rect.width() > 0)
+            avail = qMin(avail, option.rect.width() - kItemTextLeft - kItemTextRight);
+        avail = qMax(avail, 100);
+
+        QTextDocument doc;
+        doc.setDocumentMargin(0);
+        doc.setDefaultFont(option.font);
+        doc.setPlainText(index.data(Qt::DisplayRole).toString());
+        doc.setTextWidth(avail);
+        const int textH = static_cast<int>(doc.size().height() + 0.999);
+        return QSize(avail + kItemTextLeft + kItemTextRight,
+                     textH + kItemTextTop + kItemTextBottom);
+    }
+
+    void paint(QPainter *painter, const QStyleOptionViewItem &option,
+               const QModelIndex &index) const override
+    {
+        painter->save();
+        painter->setRenderHint(QPainter::TextAntialiasing, true);
+        const QRect r = option.rect;
+
+        const bool selectable = index.flags() & Qt::ItemIsSelectable;
+        const bool hovered = option.state & QStyle::State_MouseOver;
+        const bool selected = option.state & QStyle::State_Selected;
+
+        // 选中 / 悬停背景（对齐主题：选中 #DCE8FF、悬停 #F0F6FF）
+        QColor bg;
+        if (selected)
+            bg = QColor(QStringLiteral("#DCE8FF"));
+        else if (hovered && selectable)
+            bg = QColor(QStringLiteral("#F0F6FF"));
+        if (bg.isValid()) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(bg);
+            painter->drawRoundedRect(r.adjusted(2, 2, -2, -2), 6, 6);
+        }
+
+        // 文本前景色：条目自设色优先（如置灰的不可用桩），否则主题正文色
+        QColor fg = QColor(QStringLiteral("#25324F"));
+        const QVariant fgVar = index.data(Qt::ForegroundRole);
+        if (fgVar.canConvert<QBrush>())
+            fg = fgVar.value<QBrush>().color();
+        if (selected && index.flags() & Qt::ItemIsEnabled)
+            fg = QColor(QStringLiteral("#1F2D4D"));
+        if (!(index.flags() & Qt::ItemIsEnabled))
+            fg = QColor(QStringLiteral("#aaaaaa"));
+
+        // 文字区（换行绘制，保证内容完整、绝无省略号）
+        const QRect textRect = r.adjusted(kItemTextLeft, kItemTextTop,
+                                          -kItemTextRight, -kItemTextBottom);
+        if (textRect.width() <= 0 || textRect.height() <= 0) {
+            painter->restore();
+            return;
+        }
+        QTextDocument doc;
+        doc.setDocumentMargin(0);
+        doc.setDefaultFont(option.font);
+        doc.setPlainText(index.data(Qt::DisplayRole).toString());
+        doc.setTextWidth(textRect.width());
+        painter->translate(textRect.topLeft());
+        QAbstractTextDocumentLayout::PaintContext ctx;
+        ctx.palette.setColor(QPalette::Text, fg);
+        doc.documentLayout()->draw(painter, ctx);
+        painter->restore();
+
+        // 条目间分隔线
+        painter->save();
+        painter->setPen(QPen(QColor(QStringLiteral("#E6ECF5")), 1));
+        const int y = r.bottom();
+        painter->drawLine(textRect.left(), y, textRect.right(), y);
+        painter->restore();
+    }
+};
+
+// 可自动换行的列表控件：宽度变化时按新宽度重新测量各行高
+class WrapListWidget : public QListWidget
+{
+public:
+    explicit WrapListWidget(QWidget *parent = nullptr)
+        : QListWidget(parent)
+    {
+        setWordWrap(true);
+        setTextElideMode(Qt::ElideNone);
+        setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+        setItemDelegate(new WrapItemDelegate(this));
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QListWidget::resizeEvent(event);
+        doItemsLayout();   // 行高随新宽度重新换行计算
+    }
+};
+
+// 子弹窗随父窗口（主窗或上级弹窗）按宽、高分别放大：以默认主窗 390×844 为
+// 基准，参考弹窗尺寸 372×designHeight 的宽、高各自按父窗宽、高的放大倍数
+// 拉伸——主窗拉宽/拉高，弹窗同步变宽/变高（像贴在主窗里的一整页）；
+// 缩小同理；始终不越出父窗、不低于可读下限。
+QSize childDialogSize(const QWidget *parent, int designHeight)
+{
+    if (!parent)
+        return QSize(372, designHeight);
+    constexpr int kDesignWidth = 372;    // 参考弹窗宽（默认主窗宽度时的弹窗宽）
+    constexpr int kRefWinW = 390;        // 参考主窗宽（默认手机竖屏）
+    constexpr int kRefWinH = 844;        // 参考主窗高
+    int w = qRound(kDesignWidth * (parent->width()  / qreal(kRefWinW)));
+    int h = qRound(designHeight * (parent->height() / qreal(kRefWinH)));
+    // 下限保证可读；上限不越出父窗
+    w = qBound(280, w, parent->width()  - 20);
+    h = qBound(180, h, parent->height() - 40);
+    return QSize(w, h);
+}
+
+} // namespace
 
 MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     : QMainWindow(parent)
@@ -29,7 +176,8 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     setWindowTitle(QStringLiteral("充电桩用户端"));
     setObjectName(QStringLiteral("MainWindow"));
     setAttribute(Qt::WA_StyledBackground, true);
-    setFixedSize(390, 844);          // 模拟手机竖屏尺寸，锁定大小
+    resize(390, 844);                // 默认模拟手机竖屏尺寸，允许拉伸自适应不同屏幕
+    setMinimumSize(320, 568);
 
     // ================= 顶部卡片：欢迎语 + 导航按钮 =================
     auto *headerCard = new QWidget(this);
@@ -38,6 +186,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
 
     m_userLabel = new QLabel(headerCard);
     m_userLabel->setObjectName(QStringLiteral("userGreet"));
+    m_userLabel->setWordWrap(true);   // 昵称较长时窄屏自动换行，避免截断
     updateUserHeaderLabel();
 
     m_profileButton = new QPushButton(QStringLiteral("个人中心"), headerCard);
@@ -126,9 +275,10 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     searchLayout->addWidget(m_refreshButton);
 
     // ================= 站点列表 + 状态行 =================
-    m_stationList = new QListWidget(this);
+    m_stationList = new WrapListWidget(this);   // 自动换行 + 行高自适应
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
+    m_statusLabel->setWordWrap(true);   // 状态文字较长时换行，不用省略号
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
@@ -219,7 +369,7 @@ void MainWindow::showStationDetail(int stationId)
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("充电站电桩详情"));
-    dlg.resize(372, 560);   // 限制在手机窗口(390 宽)内
+    dlg.resize(childDialogSize(this, 560));   // 初始尺寸随当前窗口自适应，可再拖拽
 
     auto *lay = new QVBoxLayout(&dlg);
 
@@ -231,9 +381,8 @@ void MainWindow::showStationDetail(int stationId)
     stationLabel->setWordWrap(true);   // 窄屏下自动换行，避免文字被裁切
 
     // 电桩列表（可选中）
-    auto *pileList = new QListWidget(&dlg);
-    pileList->setStyleSheet(m_stationList->styleSheet());
-    pileList->setWordWrap(true);   // 电桩信息过长时换行显示
+    auto *pileList = new WrapListWidget(&dlg);
+    pileList->setStyleSheet(m_stationList->styleSheet());   // 换行+自适应行高由 WrapListWidget 内置
 
     // 按钮行
     auto *reserveBtn = new QPushButton(QStringLiteral("预约选中桩"), &dlg);
@@ -481,7 +630,7 @@ void MainWindow::onProfileCenter()
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("个人中心"));
-    dlg.resize(372, 520);   // 限制在手机窗口(390 宽)内
+    dlg.resize(childDialogSize(this, 520));   // 初始尺寸随当前窗口自适应，可再拖拽
 
     auto *lay = new QVBoxLayout(&dlg);
 
@@ -620,7 +769,7 @@ void MainWindow::onProfileCenter()
     connect(rechargeBtn, &QPushButton::clicked, &dlg, [&]() {
         QDialog rechargeDlg(&dlg);
         rechargeDlg.setWindowTitle(QStringLiteral("余额充值"));
-        rechargeDlg.resize(320, 200);
+        rechargeDlg.resize(childDialogSize(&dlg, 200));   // 随上级窗口自适应
 
         auto *rLay = new QVBoxLayout(&rechargeDlg);
         auto *curBalanceLabel = new QLabel(
@@ -701,14 +850,13 @@ void MainWindow::onOrderHistory()
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("订单历史"));
-    dlg.resize(372, 640);   // 限制在手机窗口(390 宽)内
+    dlg.resize(childDialogSize(this, 640));   // 初始尺寸随当前窗口自适应，可再拖拽
 
     auto *lay = new QVBoxLayout(&dlg);
-    auto *listWidget = new QListWidget(&dlg);
+    auto *listWidget = new WrapListWidget(&dlg);
     auto *closeBtn = new QPushButton(QStringLiteral("关闭"), &dlg);
     closeBtn->setStyleSheet(m_refreshButton->styleSheet());
-    listWidget->setStyleSheet(m_stationList->styleSheet());
-    listWidget->setWordWrap(true);   // 订单信息过长时换行显示
+    listWidget->setStyleSheet(m_stationList->styleSheet());   // 换行+自适应行高由 WrapListWidget 内置
 
     lay->addWidget(listWidget);
     lay->addWidget(closeBtn);
@@ -766,7 +914,7 @@ void MainWindow::onOrderHistory()
         // 订单详情弹窗
         QDialog detailDlg(&dlg);
         detailDlg.setWindowTitle(QStringLiteral("订单详情"));
-        detailDlg.resize(372, 460);   // 限制在手机窗口(390 宽)内
+        detailDlg.resize(childDialogSize(&dlg, 460));   // 随上级窗口自适应
         auto *dLay = new QVBoxLayout(&detailDlg);
 
         auto *infoLabel = new QLabel(&detailDlg);
@@ -855,16 +1003,15 @@ void MainWindow::onFavoriteList()
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("我的收藏"));
-    dlg.resize(372, 560);   // 限制在手机窗口(390 宽)内
+    dlg.resize(childDialogSize(this, 560));   // 初始尺寸随当前窗口自适应，可再拖拽
 
     auto *lay = new QVBoxLayout(&dlg);
-    auto *listWidget = new QListWidget(&dlg);
+    auto *listWidget = new WrapListWidget(&dlg);
     auto *removeBtn = new QPushButton(QStringLiteral("取消收藏选中项"), &dlg);
     auto *closeBtn = new QPushButton(QStringLiteral("关闭"), &dlg);
     removeBtn->setStyleSheet(m_refreshButton->styleSheet());
     closeBtn->setStyleSheet(m_refreshButton->styleSheet());
-    listWidget->setStyleSheet(m_stationList->styleSheet());
-    listWidget->setWordWrap(true);   // 收藏信息过长时换行显示
+    listWidget->setStyleSheet(m_stationList->styleSheet());   // 换行+自适应行高由 WrapListWidget 内置
 
     auto *btnRow = new QHBoxLayout;
     btnRow->addWidget(removeBtn);
@@ -1023,7 +1170,7 @@ bool MainWindow::checkOpenOrder(bool failClosed)
     // 自定义弹窗（替代 QMessageBox，方便加跳转按钮）
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("提示"));
-    dlg.resize(372, 340);   // 限制在手机窗口(390 宽)内
+    dlg.resize(childDialogSize(this, 340));   // 初始尺寸随当前窗口自适应，可再拖拽
     auto *lay = new QVBoxLayout(&dlg);
     auto *label = new QLabel(&dlg);
     label->setWordWrap(true);
@@ -1109,7 +1256,7 @@ void MainWindow::showChargingProgress(const QString &orderNo)
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("充电中"));
-    dlg.resize(372, 360);   // 限制在手机窗口(390 宽)内
+    dlg.resize(childDialogSize(this, 360));   // 初始尺寸随当前窗口自适应，可再拖拽
     dlg.setModal(true);
 
     auto *lay = new QVBoxLayout(&dlg);
@@ -1120,6 +1267,10 @@ void MainWindow::showChargingProgress(const QString &orderNo)
     auto *amountLabel = new QLabel(&dlg);
     auto *statusLabel = new QLabel(&dlg);
     auto *stopBtn = new QPushButton(QStringLiteral("停止充电"), &dlg);
+
+    // 信息较多时自动换行，窄屏也不用省略号截断
+    for (QLabel *l : {orderLabel, kwhLabel, timeLabel, remainLabel, amountLabel, statusLabel})
+        l->setWordWrap(true);
 
     const QString blackLabel = QStringLiteral(
         "color: #000000; font-size: 15px; font-weight: bold; padding: 4px 0px;");
@@ -1242,7 +1393,7 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("订单结算"));
-    dlg.resize(372, 340);   // 限制在手机窗口(390 宽)内
+    dlg.resize(childDialogSize(this, 340));   // 初始尺寸随当前窗口自适应，可再拖拽
     dlg.setModal(true);
 
     auto *lay = new QVBoxLayout(&dlg);
@@ -1256,6 +1407,10 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
     auto *settleBtn = new QPushButton(QStringLiteral("确认结算"), &dlg);
     auto *rechargeBtn = new QPushButton(QStringLiteral("去充值"), &dlg);
     auto *closeBtn = new QPushButton(QStringLiteral("稍后结算"), &dlg);
+
+    // 结算信息文字在窄屏下可完整换行，不用省略号截断
+    for (QLabel *l : {orderLabel, kwhLabel, amountLabel, balanceLabel})
+        l->setWordWrap(true);
 
     const QString blackLabel = QStringLiteral(
         "color: #000000; font-size: 15px; font-weight: bold; padding: 4px 0px;");
@@ -1291,7 +1446,7 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
     connect(rechargeBtn, &QPushButton::clicked, &dlg, [&]() {
         QDialog rechargeDlg(&dlg);
         rechargeDlg.setWindowTitle(QStringLiteral("余额充值"));
-        rechargeDlg.resize(320, 200);
+        rechargeDlg.resize(childDialogSize(&dlg, 200));
 
         auto *rLay = new QVBoxLayout(&rechargeDlg);
         auto *hint = new QLabel(
@@ -1299,6 +1454,7 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
                 .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2)
                 .arg(amount, 0, 'f', 2),
             &rechargeDlg);
+        hint->setWordWrap(true);
         auto *amountEdit = new QLineEdit(&rechargeDlg);
         amountEdit->setPlaceholderText(QStringLiteral("请输入充值金额（最多2位小数）"));
         amountEdit->setValidator(new QDoubleValidator(0.01, 999999.0, 2, &rechargeDlg));
