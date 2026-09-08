@@ -33,6 +33,9 @@ public:
 private slots:
     void onStartNavigation();
     void onBackToSetup();
+#ifdef CHARGE_USE_WEBENGINE
+    void applyRouteOnMap();
+#endif
 
 private:
     QString directionLiteUrl(NavMode mode) const;
@@ -72,6 +75,13 @@ private:
 #ifdef CHARGE_USE_WEBENGINE
     QWebEngineView *m_webView = nullptr;
     bool m_webEngineReady = false;
+    bool m_mapShellReady = false;
+    QString m_pendingPathJson;
+    double m_pendingOriginLng = 0;
+    double m_pendingOriginLat = 0;
+    double m_pendingDestLng = 0;
+    double m_pendingDestLat = 0;
+    bool m_pendingWalking = false;
 #endif
 };
 
