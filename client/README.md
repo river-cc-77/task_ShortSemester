@@ -12,19 +12,37 @@
 ## 构建（Ubuntu 22.04）
 
 ```bash
-sudo apt install -y qt6-base-dev qt6-webengine-dev
+sudo apt install -y qt6-base-dev
 
 cd client
 qmake6 charge-client.pro
 make -j4
 ```
 
-未安装 `qt6-webengine-dev` 时仍可编译（需去掉 `.pro` 中 `webenginewidgets`），导航会回退为系统浏览器打开。
+默认**不链接** Qt WebEngine，避免 VM 上缺 `QtWebEngineProcess` 导致启动崩溃；「一键导航」会用系统浏览器打开百度地图。
+
+若需要应用内嵌地图，再安装完整 WebEngine 并显式开启：
+
+```bash
+sudo apt install -y qt6-webengine-dev libqt6webengine6
+qmake6 CONFIG+=use_webengine charge-client.pro
+make -j4
+```
 
 ## 运行
 
 1. 启动 server（见 `../server/README.md`）
-2. `./charge-client` 或 `./run-client.sh`（推荐，已配置中文输入法环境变量）
+2. `./charge-client`
+
+若曾编译过带 WebEngine 的版本并出现 `Could not find QtWebEngineProcess`，请先清理再按默认方式编译：
+
+```bash
+make clean
+qmake6 charge-client.pro && make -j4
+./charge-client
+```
+
+Wayland 提示可忽略；若需强制 X11：`QT_QPA_PLATFORM=xcb ./charge-client`
 
 ## Linux 虚拟机中文输入法（地址栏无法切拼音）
 

@@ -1,17 +1,40 @@
 #include "mapnavigationdialog.h"
 
 #include <QDesktopServices>
+#include <QFile>
+#include <QFileInfo>
 #include <QLabel>
 #include <QPushButton>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 
-#if __has_include(<QWebEngineView>)
+#ifdef CHARGE_USE_WEBENGINE
+#include <QCoreApplication>
 #include <QWebEngineView>
-#define HAS_WEBENGINE 1
-#else
-#define HAS_WEBENGINE 0
+
+static bool ensureWebEngineProcessPath()
+{
+    const QByteArray existing = qgetenv("QTWEBENGINEPROCESS_PATH");
+    if (!existing.isEmpty()) {
+        return QFile::exists(QString::fromUtf8(existing));
+    }
+
+    const QStringList candidates = {
+        QStringLiteral("/usr/lib/x86_64-linux-gnu/qt6/libexec/QtWebEngineProcess"),
+        QStringLiteral("/usr/lib/qt6/libexec/QtWebEngineProcess"),
+        QCoreApplication::applicationDirPath()
+            + QStringLiteral("/../libexec/QtWebEngineProcess"),
+    };
+    for (const QString &path : candidates) {
+        const QString abs = QFileInfo(path).absoluteFilePath();
+        if (QFile::exists(abs)) {
+            qputenv("QTWEBENGINEPROCESS_PATH", abs.toUtf8());
+            return true;
+        }
+    }
+    return false;
+}
 #endif
 
 MapNavigationDialog::MapNavigationDialog(double originLat, double originLng,
@@ -39,18 +62,21 @@ MapNavigationDialog::MapNavigationDialog(double originLat, double originLng,
 
     auto *layout = new QVBoxLayout(this);
 
-#if HAS_WEBENGINE
-    auto *view = new QWebEngineView(this);
-    view->setUrl(QUrl(navUrl));
-    layout->addWidget(view, 1);
-#else
-    auto *tip = new QLabel(
-        QStringLiteral("未安装 Qt WebEngine 组件，将使用系统浏览器打开百度地图导航。"),
-        this);
-    tip->setWordWrap(true);
-    layout->addWidget(tip);
-    QDesktopServices::openUrl(QUrl(navUrl));
+#ifdef CHARGE_USE_WEBENGINE
+    if (ensureWebEngineProcessPath()) {
+        auto *view = new QWebEngineView(this);
+        view->setUrl(QUrl(navUrl));
+        layout->addWidget(view, 1);
+    } else
 #endif
+    {
+        auto *tip = new QLabel(
+            QStringLiteral("将使用系统浏览器打开百度地图驾车导航。"),
+            this);
+        tip->setWordWrap(true);
+        layout->addWidget(tip);
+        QDesktopServices::openUrl(QUrl(navUrl));
+    }
 
     auto *openBtn = new QPushButton(QStringLiteral("在浏览器中打开"), this);
     auto *closeBtn = new QPushButton(QStringLiteral("关闭"), this);
