@@ -169,21 +169,22 @@ inline void setupInputMethodEnv()
 
 #if defined(Q_OS_LINUX)
 #include <QDebug>
-#include <QGuiApplication>
-#include <QInputMethod>
 
 inline void logInputMethodStatus()
 {
-    QInputMethod *im = QGuiApplication::inputMethod();
-    const QString id = im ? im->identifierName() : QString();
-    qInfo().noquote() << "[IME]"
-                      << "QT_IM_MODULE=" << qgetenv("QT_IM_MODULE")
-                      << "XMODIFIERS=" << qgetenv("XMODIFIERS")
-                      << "QT_QPA_PLATFORM=" << qgetenv("QT_QPA_PLATFORM")
-                      << "plugin=" << id;
-
+    const bool fcitxRunning = processCommMatches("fcitx5") || processCommMatches("fcitx");
+    const bool ibusRunning = processCommMatches("ibus-daemon");
     const bool fcitxPlugin = fcitxQtPluginInstalled();
     const bool ibusPlugin = ibusQtPluginInstalled();
+    const QByteArray qtIm = qgetenv("QT_IM_MODULE");
+
+    qInfo().noquote() << "[IME]"
+                      << "QT_IM_MODULE=" << qtIm
+                      << "XMODIFIERS=" << qgetenv("XMODIFIERS")
+                      << "QT_QPA_PLATFORM=" << qgetenv("QT_QPA_PLATFORM")
+                      << "fcitx5=" << (fcitxRunning ? "yes" : "no")
+                      << "ibus-daemon=" << (ibusRunning ? "yes" : "no");
+
     if (!fcitxPlugin && !ibusPlugin) {
         qWarning().noquote() << "[IME] 未找到 Qt6 输入法插件。"
                                   "ibus: sudo apt install ibus ibus-pinyin"
@@ -191,12 +192,11 @@ inline void logInputMethodStatus()
         return;
     }
 
-    if (id.isEmpty() || id == QLatin1String("compose")) {
-        qWarning().noquote() << "[IME] 输入法未就绪。"
-                                  "请先点击输入框，再按 Ctrl+Space 或 Super+Space 切换拼音。";
-    } else if (processCommMatches("fcitx5") && id == QLatin1String("ibus")) {
+    if (fcitxRunning && ibusPlugin && qtIm == "ibus") {
         qInfo().noquote() << "[IME] fcitx5 已通过 ibus 兼容层接入（无需 fcitx5-frontend-qt6）。";
     }
+
+    qInfo().noquote() << "[IME] 请先点击输入框，再按 Ctrl+Space 或 Super+Space 切换拼音。";
 }
 #else
 inline void logInputMethodStatus() {}
