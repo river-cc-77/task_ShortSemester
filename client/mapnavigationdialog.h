@@ -12,6 +12,10 @@ class QRadioButton;
 class QStackedWidget;
 class QNetworkAccessManager;
 
+#ifdef CHARGE_USE_WEBENGINE
+class QWebEngineView;
+#endif
+
 class MapNavigationDialog : public QDialog
 {
     Q_OBJECT
@@ -35,6 +39,7 @@ private:
     void fetchRoute();
     void showNavigationResult(const QJsonObject &route);
     void loadStaticMap(const QJsonArray &steps);
+    void loadInteractiveMap();
 
     QString m_originDesc;
     double m_originLat = 0;
@@ -48,6 +53,7 @@ private:
     QStackedWidget *m_stack = nullptr;
     QWidget *m_setupPage = nullptr;
     QWidget *m_navPage = nullptr;
+    QStackedWidget *m_mapStack = nullptr;
 
     QLabel *m_originLabel = nullptr;
     QLabel *m_destLabel = nullptr;
@@ -59,6 +65,11 @@ private:
     QPushButton *m_startBtn = nullptr;
     QListWidget *m_stepsList = nullptr;
     QNetworkAccessManager *m_net = nullptr;
+
+#ifdef CHARGE_USE_WEBENGINE
+    QWebEngineView *m_webView = nullptr;
+    bool m_webEngineReady = false;
+#endif
 };
 
 #endif // MAPNAVIGATIONDIALOG_H

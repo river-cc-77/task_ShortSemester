@@ -5,28 +5,26 @@
 ## 当前功能
 
 - 登录、附近充电站、电站详情、预约/充电/结算
-- **一键导航**：电站详情点「导航」→ 应用内展示路线地图与分步指引（百度路线规划 API，不跳转浏览器）
+- **一键导航**：应用内 QWebEngine 交互地图 + 分步指引（不跳转浏览器）
 - **公告**：顶部「公告」按钮查看系统公告
 - 地理编码、收藏、订单历史、个人中心
 
 ## 构建（Ubuntu 22.04）
 
 ```bash
-sudo apt install -y qt6-base-dev
+sudo apt install -y qt6-base-dev qt6-webengine-dev libqt6webengine6
 
 cd client
 qmake6 charge-client.pro
 make -j4
 ```
 
-默认**不链接** Qt WebEngine；导航在应用内通过百度「路线规划 Lite / 静态图」API 完成，无需浏览器。
+导航优先使用 **QWebEngineView + 百度 JS 地图** 展示可缩放、可拖动的路线；未安装 WebEngine 时回退为静态图 + 文字指引。
 
-若需内嵌交互式网页地图，可额外安装 WebEngine 并编译：
+确认运行时组件：
 
 ```bash
-sudo apt install -y qt6-webengine-dev libqt6webengine6
-qmake6 CONFIG+=use_webengine charge-client.pro
-make -j4
+ls /usr/lib/x86_64-linux-gnu/qt6/libexec/QtWebEngineProcess
 ```
 
 ## 运行

@@ -387,6 +387,18 @@ QLabel#navMapPreview {
     border-radius: 10px;
 }
 
+QStackedWidget#navMapStack {
+    background-color: #FFFFFF;
+    border: 1px solid #E3EAF4;
+    border-radius: 10px;
+}
+
+QWebEngineView#navWebMap {
+    background-color: #FFFFFF;
+    border: none;
+    border-radius: 10px;
+}
+
 QListWidget#navStepsList {
     background-color: #FFFFFF;
     border: 1px solid #E3EAF4;

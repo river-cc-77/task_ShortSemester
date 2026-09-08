@@ -1,16 +1,9 @@
 QT += widgets network
 
-# 默认不链接 WebEngine：VM 常只装 dev 包、缺 QtWebEngineProcess 运行时，链接会导致启动崩溃。
-# 导航默认用系统浏览器打开。需要内嵌地图时再：
-#   sudo apt install -y qt6-webengine-dev libqt6webengine6
-#   qmake6 CONFIG+=use_webengine charge-client.pro && make -j4
-use_webengine {
-    qtHaveModule(webenginewidgets) {
-        QT += webenginewidgets
-        DEFINES += CHARGE_USE_WEBENGINE
-    } else {
-        warning("CONFIG+=use_webengine set but Qt webenginewidgets module not found")
-    }
+# 已安装 Qt WebEngine 时自动启用应用内交互地图（须同时安装运行时 libqt6webengine6）
+qtHaveModule(webenginewidgets) {
+    QT += webenginewidgets
+    DEFINES += CHARGE_USE_WEBENGINE
 }
 
 CONFIG += c++17
