@@ -11,6 +11,7 @@
   B  非法状态：预约态不能 stop、待支付态不能 start
   C  待支付时桩对外仍显示闲置，他人可预约；order.list 筛选
   D  pile.delete 在预约/待支付/有历史订单时禁止
+  D3 pile.update 待支付未完成单时禁止改桩（桩显示闲置但有 open order）
   E  order.admin.settle 重复结算拦截
   F  station.create 参数校验（空名、零电价、零桩数）
   G  低优先级：新号注册、头像、重复收藏、stats 字段完整性
@@ -25,6 +26,9 @@ import struct
 import sys
 from pathlib import Path
 from typing import Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from test_common import admin_default_date_range, seed_order_sample_range
 
 
 def send_request(host: str, port: int, payload: dict) -> dict:
@@ -332,7 +336,9 @@ def test_order_list_filters(host: str, port: int, admin_token: str) -> None:
         "order.list status=已完成",
     )
     items = done["data"]["items"]
-    if items and not all(i.get("status") == "已完成" for i in items):
+    if not items:
+        raise RuntimeError("order.list status=已完成 returned empty on seed db")
+    if not all(i.get("status") == "已完成" for i in items):
         raise RuntimeError("status filter returned non-已完成 rows")
 
     # C2：按手机号筛 8001
@@ -346,12 +352,32 @@ def test_order_list_filters(host: str, port: int, admin_token: str) -> None:
         if "8001" not in row.get("phone", ""):
             raise RuntimeError(f"phone filter leak: {row}")
 
-    # C3：按日期区间筛选（seed 订单在 2026-08-26~28）
+    # C3：按 seed 固定日期区间筛选（2026-08-26~28 有演示订单）
+    sample_from, sample_to = seed_order_sample_range()
     run_test(
         host, port,
         {"id": "C3", "cmd": "order.list", "token": admin_token,
-         "data": {"date_from": "2026-08-26", "date_to": "2026-08-28", "limit": 50}},
-        "order.list date range",
+         "data": {"date_from": sample_from, "date_to": sample_to, "limit": 50}},
+        "order.list date range (seed sample)",
+    )
+    order_from, order_to = admin_default_date_range()
+    run_test(
+        host, port,
+        {"id": "C4", "cmd": "order.list", "token": admin_token,
+         "data": {"date_from": order_from, "date_to": order_to, "limit": 50}},
+        "order.list date range (admin default)",
+    )
+
+
+def test_pile_update_open_order_on_idle_pile(host: str, port: int, admin_token: str) -> None:
+    """D3. 桩显示「闲置」但存在他人待支付单时，pile.update 应拒绝（SZ001-05 / 8002 seed）。"""
+    print("\n========== D3. pile.update 待支付 open order ==========")
+    run_test_error(
+        host, port,
+        {"id": "D5", "cmd": "pile.update", "token": admin_token,
+         "data": {"pile_no": "SZ001-05", "power_kw": 11.0}},
+        "pile.update blocked (8002 待支付 on idle pile)",
+        "INVALID_PARAM",
     )
 
 
@@ -575,6 +601,7 @@ def main() -> int:
     test_illegal_charge_states(host, port, token8003, token8002)
     test_unpaid_pile_still_reservable(host, port, token, token8002)
     test_order_list_filters(host, port, admin_token)
+    test_pile_update_open_order_on_idle_pile(host, port, admin_token)
     test_pile_delete_busy(host, port, token8003, admin_token)
     test_pile_delete_open_and_history(host, port, admin_token)
     test_admin_settle_duplicate(host, port, admin_token)

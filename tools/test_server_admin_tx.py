@@ -33,6 +33,9 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from test_common import admin_default_date_range
+
 
 def db_path() -> Path:
     import os
@@ -691,6 +694,18 @@ def test_admin_pile_page_api(host: str, port: int, token: str, admin_token: str)
     orig_power = float(sz005_idle[0]["power_kw"])
     log_cnt_before = db_query_scalar(db, "SELECT COUNT(*) FROM operation_log")
 
+    run_test_error(
+        host,
+        port,
+        {
+            "id": "H5c",
+            "cmd": "pile.update",
+            "token": admin_token,
+            "data": {"pile_no": "SZ001-05", "power_kw": 10.5},
+        },
+        "pile.update blocked (8002 待支付 on idle SZ001-05)",
+        "INVALID_PARAM",
+    )
     run_test(
         host,
         port,
@@ -913,6 +928,7 @@ def test_admin_pile_detail_and_create(host: str, port: int, token: str, admin_to
 def test_admin_order_page_api(host: str, port: int, admin_token: str) -> None:
     """J. Admin 订单页 — order.list 返回 UI 表格字段；status/phone 筛选。"""
     print("\n========== J. Admin 订单管理 order.list ==========")
+    order_from, order_to = admin_default_date_range()
 
     all_orders = run_test(
         host,
@@ -921,7 +937,7 @@ def test_admin_order_page_api(host: str, port: int, admin_token: str) -> None:
             "id": "J1",
             "cmd": "order.list",
             "token": admin_token,
-            "data": {"limit": 50, "date_from": "2026-08-01", "date_to": "2026-09-30"},
+            "data": {"limit": 50, "date_from": order_from, "date_to": order_to},
         },
         "order.list all",
     )
@@ -956,8 +972,8 @@ def test_admin_order_page_api(host: str, port: int, admin_token: str) -> None:
             "data": {
                 "status": "待支付",
                 "limit": 20,
-                "date_from": "2026-08-01",
-                "date_to": "2026-09-30",
+                "date_from": order_from,
+                "date_to": order_to,
             },
         },
         "order.list status=待支付",
@@ -979,8 +995,8 @@ def test_admin_order_page_api(host: str, port: int, admin_token: str) -> None:
             "data": {
                 "phone": "13800138002",
                 "limit": 20,
-                "date_from": "2026-08-01",
-                "date_to": "2026-09-30",
+                "date_from": order_from,
+                "date_to": order_to,
             },
         },
         "order.list phone=8002",
@@ -993,6 +1009,7 @@ def test_admin_order_page_api(host: str, port: int, admin_token: str) -> None:
 def test_station_crud_and_operation_log(host: str, port: int, admin_token: str) -> None:
     """K. 电站 CRUD + operation_log.list — 含 idle_piles；有历史订单的站不可删。"""
     print("\n========== K. 电站 CRUD + 操作日志 ==========")
+    log_from, log_to = admin_default_date_range()
 
     # K1：station.admin.list 含 idle_piles、online_rate（电站管理表格）
     stations = run_test(
@@ -1081,7 +1098,7 @@ def test_station_crud_and_operation_log(host: str, port: int, admin_token: str) 
             "id": "K6",
             "cmd": "operation_log.list",
             "token": admin_token,
-            "data": {"date_from": "2026-08-01", "date_to": "2026-09-30", "limit": 50},
+            "data": {"date_from": log_from, "date_to": log_to, "limit": 50},
         },
         "operation_log.list",
     )
@@ -1102,8 +1119,8 @@ def test_station_crud_and_operation_log(host: str, port: int, admin_token: str) 
             "token": admin_token,
             "data": {
                 "action": "修改电站",
-                "date_from": "2026-08-01",
-                "date_to": "2026-09-30",
+                "date_from": log_from,
+                "date_to": log_to,
                 "limit": 20,
             },
         },

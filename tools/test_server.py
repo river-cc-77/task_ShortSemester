@@ -26,7 +26,11 @@ import socket
 import struct
 import sys
 import time
+from pathlib import Path
 from typing import Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from test_common import admin_default_date_range
 
 
 def send_request(host: str, port: int, payload: dict) -> dict:
@@ -349,11 +353,22 @@ def main() -> int:
     # ===== §7 管理端只读接口 =====
 
     # id=21 station.admin.list — 电站列表（含 idle_piles、online_rate）
-    run_test(
+    admin_station_list = run_test(
         host, port,
         {"id": "21", "cmd": "station.admin.list", "token": admin_token, "data": {}},
         "station.admin.list",
     )
+    admin_station_items = admin_station_list["data"]["items"]
+    if not admin_station_items:
+        raise RuntimeError("station.admin.list returned no items")
+    for row in admin_station_items:
+        for field in ("id", "name", "total_piles", "idle_piles", "online_rate"):
+            if field not in row:
+                raise RuntimeError(f"station.admin.list missing {field}: {row}")
+        if row["idle_piles"] < 0 or row["idle_piles"] > row["total_piles"]:
+            raise RuntimeError(f"idle_piles out of range: {row}")
+    if not any(r.get("idle_piles", 0) > 0 for r in admin_station_items):
+        raise RuntimeError("fresh seed should have at least one station with idle_piles > 0")
 
     # id=22 user.admin.list — 用户管理表格
     run_test(
@@ -376,10 +391,12 @@ def main() -> int:
         "stats.overview",
     )
 
-    # id=25 order.list — 管理端查全部订单
+    # id=25 order.list — 管理端查全部订单（日期区间与 Admin UI 默认一致）
+    order_from, order_to = admin_default_date_range()
     run_test(
         host, port,
-        {"id": "25", "cmd": "order.list", "token": admin_token, "data": {"limit": 10}},
+        {"id": "25", "cmd": "order.list", "token": admin_token,
+         "data": {"limit": 10, "date_from": order_from, "date_to": order_to}},
         "order.list (admin)",
     )
 
@@ -639,6 +656,13 @@ def main() -> int:
         {"id": "40", "cmd": "pile.update", "token": admin_token,
          "data": {"pile_no": target_pile, "type": "直流"}},
         "pile.update invalid type", expect_ok=False,
+    )
+    # id=40a 手动设为「预约」应拒绝（状态由订单流程驱动，协议 5.2 + adminhandler）
+    run_test(
+        host, port,
+        {"id": "40a", "cmd": "pile.update", "token": admin_token,
+         "data": {"pile_no": target_pile, "status": "预约"}},
+        "pile.update manual 预约 rejected", expect_ok=False,
     )
 
     # id=41 pile.delete — 删除闲置且无历史约束的桩
