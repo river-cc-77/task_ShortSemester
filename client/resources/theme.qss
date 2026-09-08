@@ -370,3 +370,13 @@ QLabel#statusLabel {
     font-size: 9.5pt;
     padding: 2px 4px;
 }
+
+/* 地图导航内页（限制在手机主窗范围内） */
+QDialog#navDialog {
+    background-color: #EDF2F9;
+}
+
+QDialog#navDialog QPushButton[class="primary"] {
+    font-size: 11pt;
+    min-height: 42px;
+}

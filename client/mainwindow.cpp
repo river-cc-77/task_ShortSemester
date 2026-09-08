@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "apiclient.h"
 #include "mapnavigationdialog.h"
+#include "uiutil.h"
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QLabel>
@@ -147,25 +148,6 @@ protected:
         doItemsLayout();   // 行高随新宽度重新换行计算
     }
 };
-
-// 子弹窗随父窗口（主窗或上级弹窗）按宽、高分别放大：以默认主窗 390×844 为
-// 基准，参考弹窗尺寸 372×designHeight 的宽、高各自按父窗宽、高的放大倍数
-// 拉伸——主窗拉宽/拉高，弹窗同步变宽/变高（像贴在主窗里的一整页）；
-// 缩小同理；始终不越出父窗、不低于可读下限。
-QSize childDialogSize(const QWidget *parent, int designHeight)
-{
-    if (!parent)
-        return QSize(372, designHeight);
-    constexpr int kDesignWidth = 372;    // 参考弹窗宽（默认主窗宽度时的弹窗宽）
-    constexpr int kRefWinW = 390;        // 参考主窗宽（默认手机竖屏）
-    constexpr int kRefWinH = 844;        // 参考主窗高
-    int w = qRound(kDesignWidth * (parent->width()  / qreal(kRefWinW)));
-    int h = qRound(designHeight * (parent->height() / qreal(kRefWinH)));
-    // 下限保证可读；上限不越出父窗
-    w = qBound(280, w, parent->width()  - 20);
-    h = qBound(180, h, parent->height() - 40);
-    return QSize(w, h);
-}
 
 } // namespace
 

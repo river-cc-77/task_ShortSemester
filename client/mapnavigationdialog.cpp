@@ -1,7 +1,7 @@
 #include "mapnavigationdialog.h"
+#include "uiutil.h"
 
 #include <QDesktopServices>
-#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
@@ -9,23 +9,22 @@
 #include <QRadioButton>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QWidget>
 
 namespace {
 
 QString encodeBaiduParam(const QString &raw)
 {
-    // 百度 direction 参数中的 | : 为语法字符，不能编码
     return QString::fromUtf8(QUrl::toPercentEncoding(raw, "|:,;"));
 }
 
 QString guessRegionFromAddress(const QString &address)
 {
-    const int idx = address.indexOf(QChar(0x5E02)); // 「市」
+    const int idx = address.indexOf(QChar(0x5E02));
     if (idx <= 0) {
         return QString();
     }
     QString city = address.left(idx);
-    // 「广东省深圳市」取最后一个行政词（市名本身 2~4 字）
     if (city.size() > 4) {
         city = city.right(3);
     }
@@ -58,6 +57,14 @@ QString buildBaiduDirectionUrl(double originLat, double originLng, const QString
     return url;
 }
 
+QWidget *makeCard(QWidget *parent)
+{
+    auto *card = new QWidget(parent);
+    card->setObjectName(QStringLiteral("searchCard"));
+    card->setAttribute(Qt::WA_StyledBackground, true);
+    return card;
+}
+
 } // namespace
 
 MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
@@ -74,60 +81,90 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     , m_destLng(destLng)
     , m_region(guessRegionFromAddress(destAddress))
 {
+    setObjectName(QStringLiteral("navDialog"));
     setWindowTitle(QStringLiteral("地图导航"));
-    setMinimumWidth(480);
+    setAttribute(Qt::WA_StyledBackground, true);
 
     auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(14, 14, 14, 14);
+    layout->setSpacing(10);
 
-    auto *routeBox = new QGroupBox(QStringLiteral("路线信息"), this);
-    auto *routeLay = new QVBoxLayout(routeBox);
+    auto *titleLabel = new QLabel(QStringLiteral("地图导航"), this);
+    titleLabel->setObjectName(QStringLiteral("userGreet"));
+    layout->addWidget(titleLabel);
 
-    m_originLabel = new QLabel(routeBox);
+    auto *routeCard = makeCard(this);
+    auto *routeLay = new QVBoxLayout(routeCard);
+    routeLay->setContentsMargins(12, 10, 12, 10);
+    routeLay->setSpacing(8);
+
+    auto *routeTitle = new QLabel(QStringLiteral("路线信息"), routeCard);
+    routeTitle->setObjectName(QStringLiteral("sectionTitle"));
+
+    m_originLabel = new QLabel(routeCard);
     m_originLabel->setWordWrap(true);
     m_originLabel->setText(QStringLiteral("起点：%1\n（%2, %3）")
                                .arg(m_originDesc)
                                .arg(m_originLat, 0, 'f', 6)
                                .arg(m_originLng, 0, 'f', 6));
 
-    m_destLabel = new QLabel(routeBox);
+    m_destLabel = new QLabel(routeCard);
     m_destLabel->setWordWrap(true);
     m_destLabel->setText(QStringLiteral("终点：%1\n（%2, %3）")
                              .arg(m_destName)
                              .arg(m_destLat, 0, 'f', 6)
                              .arg(m_destLng, 0, 'f', 6));
 
+    routeLay->addWidget(routeTitle);
     routeLay->addWidget(m_originLabel);
     routeLay->addWidget(m_destLabel);
-    layout->addWidget(routeBox);
+    layout->addWidget(routeCard);
 
-    auto *modeBox = new QGroupBox(QStringLiteral("出行方式"), this);
-    auto *modeLay = new QHBoxLayout(modeBox);
-    m_drivingRadio = new QRadioButton(QStringLiteral("驾车"), modeBox);
-    m_walkingRadio = new QRadioButton(QStringLiteral("步行"), modeBox);
+    auto *modeCard = makeCard(this);
+    auto *modeLay = new QVBoxLayout(modeCard);
+    modeLay->setContentsMargins(12, 10, 12, 10);
+    modeLay->setSpacing(8);
+
+    auto *modeTitle = new QLabel(QStringLiteral("出行方式"), modeCard);
+    modeTitle->setObjectName(QStringLiteral("sectionTitle"));
+
+    auto *modeRow = new QHBoxLayout;
+    m_drivingRadio = new QRadioButton(QStringLiteral("驾车"), modeCard);
+    m_walkingRadio = new QRadioButton(QStringLiteral("步行"), modeCard);
     m_drivingRadio->setChecked(true);
-    modeLay->addWidget(m_drivingRadio);
-    modeLay->addWidget(m_walkingRadio);
-    modeLay->addStretch();
-    layout->addWidget(modeBox);
+    modeRow->addWidget(m_drivingRadio);
+    modeRow->addWidget(m_walkingRadio);
+    modeRow->addStretch();
+
+    modeLay->addWidget(modeTitle);
+    modeLay->addLayout(modeRow);
+    layout->addWidget(modeCard);
 
     m_statusLabel = new QLabel(
-        QStringLiteral("路线已就绪。选择出行方式后，点击「开始导航」将在外部地图中打开（起终点已预填）。"),
+        QStringLiteral("起终点已就绪，选择方式后点击「开始导航」。"),
         this);
+    m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
     m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
 
-    m_startBtn = new QPushButton(QStringLiteral("开始导航"), this);
-    m_startBtn->setEnabled(true);
-    auto *closeBtn = new QPushButton(QStringLiteral("关闭"), this);
+    layout->addStretch();
 
-    auto *btnRow = new QHBoxLayout;
-    btnRow->addStretch();
-    btnRow->addWidget(m_startBtn);
-    btnRow->addWidget(closeBtn);
-    layout->addLayout(btnRow);
+    m_startBtn = new QPushButton(QStringLiteral("开始导航"), this);
+    m_startBtn->setProperty("class", "primary");
+    m_startBtn->setCursor(Qt::PointingHandCursor);
+    m_startBtn->setMinimumHeight(42);
+
+    auto *closeBtn = new QPushButton(QStringLiteral("返回"), this);
+    closeBtn->setCursor(Qt::PointingHandCursor);
+    closeBtn->setMinimumHeight(36);
+
+    layout->addWidget(m_startBtn);
+    layout->addWidget(closeBtn);
 
     connect(m_startBtn, &QPushButton::clicked, this, &MapNavigationDialog::onStartNavigation);
     connect(closeBtn, &QPushButton::clicked, this, &QDialog::reject);
+
+    fitDialogInParent(this, parent, 460);
 }
 
 MapNavigationDialog::NavMode MapNavigationDialog::selectedMode() const
