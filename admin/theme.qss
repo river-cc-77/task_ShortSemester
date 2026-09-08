@@ -343,8 +343,8 @@ QLabel#sidebarVersion {
 
 /* 侧边导航按钮（左侧 3px 光条占位，选中时点亮，文字不跳动） */
 QPushButton#btnOverview, QPushButton#btnPile, QPushButton#btnStation,
-QPushButton#btnUser, QPushButton#btnOrder, QPushButton#btnLog,
-QPushButton#btnChart {
+QPushButton#btnUser, QPushButton#btnOrder, QPushButton#btnAnnouncement,
+QPushButton#btnLog {
     background: transparent;
     border: none;
     border-left: 3px solid transparent;
@@ -356,16 +356,16 @@ QPushButton#btnChart {
 }
 
 QPushButton#btnOverview:hover, QPushButton#btnPile:hover, QPushButton#btnStation:hover,
-QPushButton#btnUser:hover, QPushButton#btnOrder:hover, QPushButton#btnLog:hover,
-QPushButton#btnChart:hover {
+QPushButton#btnUser:hover, QPushButton#btnOrder:hover, QPushButton#btnAnnouncement:hover,
+QPushButton#btnLog:hover {
     background-color: rgba(255,255,255,0.07);
     color: #FFFFFF;
 }
 
 QPushButton#btnOverview[selected="true"], QPushButton#btnPile[selected="true"],
 QPushButton#btnStation[selected="true"], QPushButton#btnUser[selected="true"],
-QPushButton#btnOrder[selected="true"], QPushButton#btnLog[selected="true"],
-QPushButton#btnChart[selected="true"] {
+QPushButton#btnOrder[selected="true"], QPushButton#btnAnnouncement[selected="true"],
+QPushButton#btnLog[selected="true"] {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2B6BFF, stop:1 #3D7EFF);
     border-left: 3px solid #00C6F5;
     color: #FFFFFF;
@@ -374,17 +374,38 @@ QPushButton#btnChart[selected="true"] {
 
 QPushButton#btnOverview[selected="true"]:hover, QPushButton#btnPile[selected="true"]:hover,
 QPushButton#btnStation[selected="true"]:hover, QPushButton#btnUser[selected="true"]:hover,
-QPushButton#btnOrder[selected="true"]:hover, QPushButton#btnLog[selected="true"]:hover,
-QPushButton#btnChart[selected="true"]:hover {
+QPushButton#btnOrder[selected="true"]:hover, QPushButton#btnAnnouncement[selected="true"]:hover,
+QPushButton#btnLog[selected="true"]:hover {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #336FFF, stop:1 #4F8BFF);
     border-left: 3px solid #00C6F5;
     color: #FFFFFF;
 }
 
+/* 总览页工具条按钮（浅色背景，不用侧边栏深色样式） */
+QWidget#widget_top_bar QPushButton#btnChart {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3D7EFF, stop:1 #2B6BFF);
+    color: #FFFFFF;
+    border: 1px solid #1F5AE6;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+QWidget#widget_top_bar QPushButton#btnChart:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4F8BFF, stop:1 #336FFF);
+    border-color: #1A50D0;
+    color: #FFFFFF;
+}
+
+QWidget#widget_top_bar QPushButton#btnChart:pressed {
+    background: #1F5AE6;
+    border-color: #1A50D0;
+    color: #FFFFFF;
+}
+
 /* ------------------------- 内容区工具条卡片 ------------------------- */
-QWidget#widget_4, QWidget#widget_6, QWidget#widget_stationFilter,
-QWidget#widget_logFilter, QWidget#widget_orderFilter, QWidget#widget_2,
-QWidget#widget_top_bar, QWidget#widget_chart {
+QWidget#widget_4, QWidget#widget_6, QWidget#widget_stationFilter, QWidget#widget,
+QWidget#widget_logFilter, QWidget#widget_orderFilter, QWidget#widget_announcementFilter,
+QWidget#widget_2, QWidget#widget_top_bar, QWidget#widget_chart {
     background-color: #FFFFFF;
     border: 1px solid #E3EAF4;
     border-radius: 12px;

@@ -116,6 +116,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
         b->setCursor(Qt::PointingHandCursor);
     };
     markBtn(ui->btnRefresh, "primary");
+    markBtn(ui->btnChart, "primary");
     markBtn(ui->btnPileQuery, "primary");
     markBtn(ui->btnAddPile, "primary");
     markBtn(ui->btnRemoteReboot, "primary");
@@ -130,6 +131,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     markBtn(ui->btnAnnouncementRefresh, "primary");
     ui->btnGoPileStatus->setCursor(Qt::PointingHandCursor);
     ui->btnShift->setCursor(Qt::PointingHandCursor);
+    ui->btnAnnouncement->setCursor(Qt::PointingHandCursor);
     ui->btnSearch->setText(QStringLiteral("查询"));
     ui->btnSearch->setMinimumWidth(100);
 
@@ -188,8 +190,6 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
             return;
         }
         resetAllBtnSelect();
-        ui->btnChart->setProperty("selected", true);
-        refreshBtnStyle(ui->btnChart);
         ui->stackedWidget->setCurrentIndex(5);
         m_currentDays =7;
         ui->btnShift->setText("查看近30日");
@@ -487,7 +487,7 @@ MainWindow::~MainWindow()
 void MainWindow::resetAllBtnSelect()
 {
     auto btns = {ui->btnOverview, ui->btnPile, ui->btnStation, ui->btnUser,
-                 ui->btnOrder, ui->btnAnnouncement, ui->btnLog, ui->btnChart};
+                 ui->btnOrder, ui->btnAnnouncement, ui->btnLog};
     for(auto btn : btns)
     {
         btn->setProperty("selected", false);
