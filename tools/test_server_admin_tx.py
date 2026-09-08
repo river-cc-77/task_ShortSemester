@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
-"""Admin UI backend + transaction consistency tests (server 16c6912+).
+"""Admin 管理端 UI 后端 + 数据库事务一致性测试。
 
-Covers APIs used by admin/mainwindow.cpp and post-transaction DB invariants
-not fully asserted by test_server.py / test_server_gaps.py.
+对应 admin/mainwindow.cpp 各页面调用的 API，并直接查 SQLite 验证
+「预约/结算/代结算」后订单、桩状态、余额、流水、操作日志是否一致。
 
-Recommended run order (fresh db):
+用法：
   python3 tools/make_db.py
-  cd server && qmake6 charge-server.pro && make -j4 && ./charge-server   # terminal 1
-  python3 tools/test_server.py                                          # optional baseline
-  python3 tools/test_server_gaps.py                                     # optional
-  python3 tools/test_server_admin_tx.py                                 # this script (~20s)
+  cd server && ./charge-server
+  python3 tools/test_server_admin_tx.py
+
+用例分组：
+  A  总览页 stats.overview（KPI、pile_status 四态、revenue_trend）
+  B  用户页 user.admin.list 字段与 phone_keyword 筛选
+  C  冻结/解冻往返；待支付时禁止冻结
+  D  事务：reserve 后 DB 里订单与桩同为「预约」
+  E  事务：settle 后余额、wallet_log、订单状态、桩回闲置
+  F  事务：余额不足时不部分扣款，订单保持待支付
+  G  事务：order.admin.settle 写入 operation_log「代结算」
+  H  电桩页 list 筛选 / update / restart / 写日志 / 占用态拦截
+  I  电桩 detail / create / delete
+  J  订单页 order.list 字段与筛选
+  K  电站 CRUD + operation_log.list
 """
 
 from __future__ import annotations
@@ -94,6 +105,7 @@ def db_query_scalar(db: Path, sql: str, params: tuple = ()) -> Any:
 
 
 def find_idle_pile(host: str, port: int, token: str) -> str:
+    """遍历 station 1~5 的 detail，返回第一个「闲置」桩号。"""
     for station_id in range(1, 6):
         detail = send_request(
             host,
@@ -143,6 +155,7 @@ def _recharge_for_settle(host: str, port: int, token: str, order_no: str, order:
 
 
 def finish_order(host: str, port: int, token: str, order_no: str, admin_token: str) -> None:
+    """推进订单到已完成；余额不足时充值或 admin.settle。"""
     check = send_request(
         host,
         port,
@@ -225,7 +238,9 @@ def finish_order(host: str, port: int, token: str, order_no: str, admin_token: s
 
 
 def test_admin_dashboard_api(host: str, port: int, admin_token: str) -> None:
+    """A. Admin 总览页 — stats.overview 返回 UI 需要的 KPI、四态桩统计、7 日折线。"""
     print("\n========== A. Admin 总览页 API（mainwindow 总览） ==========")
+    # A1：days=7 时检查 today_revenue / pile_status 四键 / revenue_trend 长度与结构
     stats = run_test(
         host,
         port,
@@ -251,6 +266,7 @@ def test_admin_dashboard_api(host: str, port: int, admin_token: str) -> None:
         if "date" not in item or "revenue" not in item:
             raise RuntimeError("revenue_trend item missing date/revenue")
 
+    # A2：不传 days 时使用默认天数（协议默认 7）
     run_test(
         host,
         port,
@@ -260,7 +276,9 @@ def test_admin_dashboard_api(host: str, port: int, admin_token: str) -> None:
 
 
 def test_admin_user_list_api(host: str, port: int, admin_token: str) -> None:
+    """B. Admin 用户页 — user.admin.list 表格字段 + phone_keyword 筛选。"""
     print("\n========== B. Admin 用户页 API（mainwindow 用户表格） ==========")
+    # B1：每行必须有 user_id/phone/nickname/balance/created_at/status
     all_users = run_test(
         host,
         port,
@@ -277,6 +295,7 @@ def test_admin_user_list_api(host: str, port: int, admin_token: str) -> None:
             if field not in row:
                 raise RuntimeError(f"user.admin.list row missing {field}: {row}")
 
+    # B2：phone_keyword=8001 只返回含 8001 的手机号
     filtered = run_test(
         host,
         port,
@@ -294,6 +313,7 @@ def test_admin_user_list_api(host: str, port: int, admin_token: str) -> None:
     if not all("8001" in row.get("phone", "") for row in fitems):
         raise RuntimeError(f"phone_keyword filter leak: {fitems}")
 
+    # B3：无匹配 keyword 应返回空列表
     empty = run_test(
         host,
         port,
@@ -310,9 +330,11 @@ def test_admin_user_list_api(host: str, port: int, admin_token: str) -> None:
 
 
 def test_admin_freeze_roundtrip(host: str, port: int, admin_token: str) -> None:
+    """C. 冻结 8003 → 不能登录 → 解冻 → 能登录（用户页冻结按钮）。"""
     print("\n========== C. Admin 冻结/解冻（用户页按钮） ==========")
     user_id = db_query_scalar(db_path(), "SELECT id FROM user WHERE phone = ?", ("13800138003",))
 
+    # C1 冻结
     run_test(
         host,
         port,
@@ -324,6 +346,7 @@ def test_admin_freeze_roundtrip(host: str, port: int, admin_token: str) -> None:
         },
         "user.freeze 8003",
     )
+    # C2 冻结后登录失败
     run_test(
         host,
         port,
@@ -332,6 +355,7 @@ def test_admin_freeze_roundtrip(host: str, port: int, admin_token: str) -> None:
         expect_ok=False,
     )
 
+    # C3 解冻
     run_test(
         host,
         port,
@@ -343,6 +367,7 @@ def test_admin_freeze_roundtrip(host: str, port: int, admin_token: str) -> None:
         },
         "user.freeze unfreeze 8003",
     )
+    # C4 解冻后可登录
     run_test(
         host,
         port,
@@ -352,6 +377,7 @@ def test_admin_freeze_roundtrip(host: str, port: int, admin_token: str) -> None:
 
 
 def test_freeze_blocked_with_pending_order(host: str, port: int, admin_token: str) -> None:
+    """C2. 8002 有待支付订单时冻结应被拒绝（避免冻结+待支付死锁）。"""
     print("\n========== C2. 待支付订单时禁止冻结 ==========")
     user_id = db_query_scalar(db_path(), "SELECT id FROM user WHERE phone = ?", ("13800138002",))
     run_test(
@@ -369,6 +395,7 @@ def test_freeze_blocked_with_pending_order(host: str, port: int, admin_token: st
 
 
 def test_tx_reserve_consistency(host: str, port: int, token: str, admin_token: str) -> None:
+    """D. 事务一致性：reserve 成功后 SQLite 里 pile=预约 且 order=预约。"""
     print("\n========== D. 事务：reserve 订单与桩状态一致 ==========")
     db = db_path()
     finish_order(host, port, token, "", admin_token)
@@ -396,6 +423,7 @@ def test_tx_reserve_consistency(host: str, port: int, token: str, admin_token: s
 
 
 def test_tx_settle_consistency(host: str, port: int, token: str, admin_token: str) -> None:
+    """E. 事务一致性：settle 后订单已完成、桩闲置、余额扣减、wallet_log 增一条。"""
     print("\n========== E. 事务：settle 扣款/流水/订单/桩统计一致 ==========")
     db = db_path()
     finish_order(host, port, token, "", admin_token)
@@ -466,6 +494,7 @@ def test_tx_settle_consistency(host: str, port: int, token: str, admin_token: st
 
 
 def test_tx_settle_insufficient_no_partial(host: str, port: int, admin_token: str) -> None:
+    """F. 余额不足时 settle 失败，且 balance 不被部分扣除，订单仍为待支付。"""
     print("\n========== F. 事务：余额不足时不应部分扣款 ==========")
     db = db_path()
 
@@ -530,6 +559,7 @@ def test_tx_settle_insufficient_no_partial(host: str, port: int, admin_token: st
 
 
 def test_tx_admin_settle_operation_log(host: str, port: int, token: str, admin_token: str) -> None:
+    """G. order.admin.settle 成功后 operation_log 多一条 action=代结算。"""
     print("\n========== G. 事务：admin.settle 写 operation_log ==========")
     db = db_path()
     log_cnt_before = db_query_scalar(db, "SELECT COUNT(*) FROM operation_log")
@@ -578,6 +608,7 @@ def test_tx_admin_settle_operation_log(host: str, port: int, token: str, admin_t
 
 
 def test_admin_pile_page_api(host: str, port: int, token: str, admin_token: str) -> None:
+    """H. Admin 电桩页 — list 筛选、update 写库与日志、restart、占用态禁止改状态/重启。"""
     print("\n========== H. Admin 电桩页 API（list / update / restart） ==========")
     db = db_path()
 
@@ -769,6 +800,7 @@ def test_admin_pile_page_api(host: str, port: int, token: str, admin_token: str)
 
 
 def test_admin_pile_detail_and_create(host: str, port: int, token: str, admin_token: str) -> None:
+    """I. pile.detail 闲置/预约态 current_order；pile.create 自动生成桩号并写日志。"""
     print("\n========== I. Admin 电桩 detail / create ==========")
     db = db_path()
 
@@ -879,6 +911,7 @@ def test_admin_pile_detail_and_create(host: str, port: int, token: str, admin_to
 
 
 def test_admin_order_page_api(host: str, port: int, admin_token: str) -> None:
+    """J. Admin 订单页 — order.list 返回 UI 表格字段；status/phone 筛选。"""
     print("\n========== J. Admin 订单管理 order.list ==========")
 
     all_orders = run_test(
@@ -958,8 +991,10 @@ def test_admin_order_page_api(host: str, port: int, admin_token: str) -> None:
 
 
 def test_station_crud_and_operation_log(host: str, port: int, admin_token: str) -> None:
+    """K. 电站 CRUD + operation_log.list — 含 idle_piles；有历史订单的站不可删。"""
     print("\n========== K. 电站 CRUD + 操作日志 ==========")
 
+    # K1：station.admin.list 含 idle_piles、online_rate（电站管理表格）
     stations = run_test(
         host,
         port,
@@ -1091,6 +1126,7 @@ def main() -> int:
 
     print(f"Admin+TX tests -> {host}:{port}, db={db}")
 
+    # 前置登录：管理员 + 主测试用户 8001
     admin = run_test(
         host,
         port,

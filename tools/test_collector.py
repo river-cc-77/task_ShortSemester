@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Verify ads-collector output against charge.db business tables."""
+"""ads-collector 数据采集结果校验 — 对照业务库验证 ads_* 分析表是否正确。
+
+前置：先跑 collector 写入分析表
+  cd collector && ./ads-collector
+
+用法：
+  python3 tools/test_collector.py
+
+检查项：
+  [1/4] 8 张对外 ads 表是否存在且有数据
+  [2/4] ads_daily_stats 营收/单量 与 ads_order_fact 清洗底稿是否对账一致
+  [3/4] ads_order_fact 台账行数与近 30 天窗口
+  [4/4] 有订单的日期是否算出 completion_rate、utilization 等派生指标
+"""
 
 import os
 import sqlite3
@@ -8,6 +21,7 @@ from pathlib import Path
 
 
 def db_path() -> Path:
+    """业务库路径，可用环境变量 ADS_DB 覆盖。"""
     env = os.environ.get("ADS_DB")
     if env:
         return Path(env)
@@ -35,6 +49,7 @@ def check_table_exists(cur: sqlite3.Cursor, table: str) -> bool:
 
 
 def check_table_has_rows(cur: sqlite3.Cursor, table: str, label: str) -> None:
+    """表必须存在且非空 — 否则说明 schema 未建或 collector 未跑。"""
     if not check_table_exists(cur, table):
         raise RuntimeError(
             f"{label}: table {table} missing — rebuild db from schema.sql "
@@ -52,6 +67,10 @@ def check_table_has_rows(cur: sqlite3.Cursor, table: str, label: str) -> None:
 
 
 def check_daily_reconciliation(cur: sqlite3.Cursor) -> None:
+    """平台日 KPI 与订单事实表对账：同一 stat_date 的 revenue、order_count 应一致。
+
+    口径：ads_order_fact 中 excluded=0 且 status=已完成 的订单。
+    """
     ads_rows = fetch_all(
         cur,
         """
@@ -60,7 +79,7 @@ def check_daily_reconciliation(cur: sqlite3.Cursor) -> None:
          ORDER BY stat_date
         """,
     )
-    # 与 aggregator 相同口径：读 ads_order_fact 中 excluded=0 的已完成单
+    # 与 collector aggregator 相同口径
     fact_rows = fetch_all(
         cur,
         """
@@ -76,7 +95,7 @@ def check_daily_reconciliation(cur: sqlite3.Cursor) -> None:
     for stat_date, revenue, orders in ads_rows:
         if stat_date not in fact_map:
             if revenue == 0 and orders == 0:
-                continue
+                continue  # 静默日填 0，fact 无行是正常的
             mismatches.append(f"{stat_date}: no fact rows but ads has data")
             continue
         fact_rev, fact_cnt = fact_map[stat_date]
@@ -87,6 +106,7 @@ def check_daily_reconciliation(cur: sqlite3.Cursor) -> None:
     if mismatches:
         raise RuntimeError("ads_daily_stats reconciliation failed:\n  " + "\n  ".join(mismatches))
 
+    # 被清洗剔除的已完成单（如 test_server 瞬间充电金额为 0）仅提示，不算失败
     excluded = fetch_one(
         cur,
         """
@@ -103,6 +123,7 @@ def check_daily_reconciliation(cur: sqlite3.Cursor) -> None:
 
 
 def check_order_fact(cur: sqlite3.Cursor) -> None:
+    """ads_order_fact 每单一行；统计 excluded 分布与近 30 天窗口行数。"""
     excluded = fetch_all(
         cur, "SELECT excluded, COUNT(*) FROM ads_order_fact GROUP BY excluded ORDER BY excluded"
     )
@@ -118,6 +139,7 @@ def check_order_fact(cur: sqlite3.Cursor) -> None:
 
 
 def check_derived_columns(cur: sqlite3.Cursor) -> None:
+    """有已完成订单的日期，ads_daily_stats 应算出 completion_rate、utilization。"""
     row = fetch_one(
         cur,
         """
@@ -149,30 +171,37 @@ def main() -> int:
     cur = conn.cursor()
 
     try:
+        # [1/4] collector 应填充的 8 张对外分析表（供 dashboard 直读）
         print("\n[1/4] ads_* tables populated")
         for table, label in [
-            ("ads_daily_stats", "platform daily"),
-            ("ads_order_fact", "order fact"),
-            ("ads_status_snapshot", "status snapshot"),
-            ("ads_station_daily", "station daily"),
-            ("ads_pile_daily", "pile daily"),
-            ("ads_hourly_stats", "hourly"),
-            ("ads_station_hourly", "station hourly"),
-            ("ads_region_daily", "region daily"),
+            ("ads_daily_stats", "平台日 KPI — KPI 卡、营收趋势"),
+            ("ads_order_fact", "订单清洗台账 — 指标取数底稿（内部）"),
+            ("ads_status_snapshot", "桩状态周期快照 — 状态分布/趋势"),
+            ("ads_station_daily", "电站×日 — 站排行、站趋势"),
+            ("ads_pile_daily", "桩×日 — 单桩钻取、桩利用率"),
+            ("ads_hourly_stats", "平台×小时 — 高峰曲线"),
+            ("ads_station_hourly", "站×小时 — 每站高峰"),
+            ("ads_region_daily", "区域×日 — 区域分布"),
         ]:
             check_table_has_rows(cur, table, label)
 
+        # [2/4] 日营收与 fact 表对账，防止聚合逻辑错误
         print("\n[2/4] daily revenue reconciliation")
         check_daily_reconciliation(cur)
 
+        # [3/4] fact 表规模 sanity check
         print("\n[3/4] order fact ledger")
         check_order_fact(cur)
 
+        # [4/4] 派生指标非空
         print("\n[4/4] derived metric columns")
         check_derived_columns(cur)
 
         issue_cnt = fetch_one(cur, "SELECT COUNT(*) FROM ads_order_issue")[0]
-        print(f"\n  info ads_order_issue: {issue_cnt} issue row(s) (0 expected on clean seed)")
+        print(
+            f"\n  info ads_order_issue: {issue_cnt} issue row(s) "
+            f"(0 expected on clean seed; >0 after test_server 异常单)"
+        )
 
     finally:
         conn.close()
