@@ -1,3 +1,6 @@
+#include "mainwindow.h"
+#include "ui_mainwindow.h"
+#include "apiclient.h"
 #include "announcementmanagedialog.h"
 #include <QJsonObject>
 #include <QJsonArray>
