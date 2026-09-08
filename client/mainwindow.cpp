@@ -393,7 +393,7 @@ void MainWindow::showStationDetail(int stationId)
     // 按钮行
     auto *reserveBtn = new QPushButton(QStringLiteral("预约选中桩"), &dlg);
     auto *favoriteBtn = new QPushButton(QStringLiteral("收藏该站"), &dlg);
-    auto *navBtn = new QPushButton(QStringLiteral("一键导航"), &dlg);
+    auto *navBtn = new QPushButton(QStringLiteral("导航"), &dlg);
     auto *closeBtn = new QPushButton(QStringLiteral("关闭"), &dlg);
     reserveBtn->setStyleSheet(m_refreshButton->styleSheet());
     favoriteBtn->setStyleSheet(m_refreshButton->styleSheet());
@@ -438,9 +438,10 @@ void MainWindow::showStationDetail(int stationId)
     const double destLat = station.value(QStringLiteral("lat")).toDouble();
     const double destLng = station.value(QStringLiteral("lng")).toDouble();
     const QString destName = station.value(QStringLiteral("name")).toString();
+    const QString destAddress = station.value(QStringLiteral("address")).toString();
 
-    connect(navBtn, &QPushButton::clicked, &dlg, [this, destLat, destLng, destName]() {
-        showMapNavigation(destLat, destLng, destName);
+    connect(navBtn, &QPushButton::clicked, &dlg, [this, destLat, destLng, destName, destAddress]() {
+        showMapNavigation(destLat, destLng, destName, destAddress);
     });
 
     // 填充电桩列表
@@ -1095,17 +1096,31 @@ void MainWindow::onFavoriteList()
     dlg.exec();
 }
 
-void MainWindow::showMapNavigation(double destLat, double destLng, const QString &destName)
+void MainWindow::showMapNavigation(double destLat, double destLng, const QString &destName,
+                                   const QString &destAddress)
 {
+    if (destName.trimmed().isEmpty() || (qFuzzyIsNull(destLat) && qFuzzyIsNull(destLng))) {
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("请先选择充电站"));
+        return;
+    }
+
     if (m_latEdit->text().trimmed().isEmpty() || m_lngEdit->text().trimmed().isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("请先设置当前位置（经纬度或地理编码）后再导航"));
+                             QStringLiteral("请先设置当前位置"));
         return;
     }
 
     const double originLat = m_latEdit->text().toDouble();
     const double originLng = m_lngEdit->text().toDouble();
-    MapNavigationDialog navDlg(originLat, originLng, destLat, destLng, destName, m_baiduAk, this);
+
+    QString originDesc = m_addressEdit->text().trimmed();
+    if (originDesc.isEmpty()) {
+        originDesc = QStringLiteral("当前位置");
+    }
+
+    MapNavigationDialog navDlg(originDesc, originLat, originLng,
+                               destName, destLat, destLng, destAddress, this);
     navDlg.exec();
 }
 

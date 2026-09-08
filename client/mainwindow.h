@@ -29,7 +29,8 @@ private slots:
     void onOrderHistory();   // 订单历史
     void onFavoriteList();   // 收藏列表
     void onAnnouncementList(); // 公告列表
-    void showMapNavigation(double destLat, double destLng, const QString &destName);
+    void showMapNavigation(double destLat, double destLng, const QString &destName,
+                           const QString &destAddress = QString());
 private:
     void loadStations();
     void showStationDetail(int stationId); // 弹出站点详情对话框
