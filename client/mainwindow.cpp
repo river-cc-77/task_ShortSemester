@@ -598,6 +598,7 @@ QJsonObject MainWindow::geocodeByBaidu(const QString &address)
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("address"), address);
     query.addQueryItem(QStringLiteral("output"), QStringLiteral("json"));
+    query.addQueryItem(QStringLiteral("ret_coordtype"), QStringLiteral("gcj02"));
     query.addQueryItem(QStringLiteral("ak"), m_baiduAk);
     url.setQuery(query);
 

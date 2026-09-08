@@ -6,8 +6,38 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+
+namespace {
+
+QString buildBaiduDirectionUrl(double originLat, double originLng,
+                               double destLat, double destLng,
+                               const QString &destName)
+{
+    // 官方地图调起 API（map.baidu.com/direction 会 404）
+    QUrl url(QStringLiteral("https://api.map.baidu.com/direction"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("origin"),
+                       QStringLiteral("latlng:%1,%2|name:%3")
+                           .arg(originLat, 0, 'f', 6)
+                           .arg(originLng, 0, 'f', 6)
+                           .arg(QStringLiteral("当前位置")));
+    query.addQueryItem(QStringLiteral("destination"),
+                       QStringLiteral("latlng:%1,%2|name:%3")
+                           .arg(destLat, 0, 'f', 6)
+                           .arg(destLng, 0, 'f', 6)
+                           .arg(destName));
+    query.addQueryItem(QStringLiteral("mode"), QStringLiteral("driving"));
+    query.addQueryItem(QStringLiteral("output"), QStringLiteral("html"));
+    query.addQueryItem(QStringLiteral("coord_type"), QStringLiteral("gcj02"));
+    query.addQueryItem(QStringLiteral("src"), QStringLiteral("webapp.chargeClient.navigation"));
+    url.setQuery(query);
+    return url.toString(QUrl::FullyEncoded);
+}
+
+} // namespace
 
 #ifdef CHARGE_USE_WEBENGINE
 #include <QCoreApplication>
@@ -47,18 +77,7 @@ MapNavigationDialog::MapNavigationDialog(double originLat, double originLng,
     setWindowTitle(QStringLiteral("地图导航 - %1").arg(destName));
     resize(900, 640);
 
-    const QString encodedName = QString::fromUtf8(QUrl::toPercentEncoding(destName));
-    const QString navUrl = QStringLiteral(
-        "https://map.baidu.com/direction?"
-        "origin=latlng:%1,%2|name:%3"
-        "&destination=latlng:%4,%5|name:%6"
-        "&mode=driving&region=全国&output=html&src=webapp.chargeClient")
-                               .arg(originLat, 0, 'f', 6)
-                               .arg(originLng, 0, 'f', 6)
-                               .arg(QString::fromUtf8(QUrl::toPercentEncoding(QStringLiteral("当前位置"))))
-                               .arg(destLat, 0, 'f', 6)
-                               .arg(destLng, 0, 'f', 6)
-                               .arg(encodedName);
+    const QString navUrl = buildBaiduDirectionUrl(originLat, originLng, destLat, destLng, destName);
 
     auto *layout = new QVBoxLayout(this);
 
