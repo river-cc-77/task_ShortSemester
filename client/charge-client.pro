@@ -1,4 +1,7 @@
-QT += widgets network webenginewidgets
+QT += widgets network
+
+# WebEngine 可选：未安装 qt6-webengine-dev 时仍可编译，导航会回退为系统浏览器
+qtHaveModule(webenginewidgets): QT += webenginewidgets
 
 CONFIG += c++17
 CONFIG -= app_bundle
