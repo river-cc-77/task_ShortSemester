@@ -79,8 +79,8 @@ QString stripHtmlTags(const QString &html)
 }
 
 QString buildPathJsonFromSteps(const QJsonArray &steps,
-                               double originLat, double originLng,
-                               double destLat, double destLng)
+                               const QJsonObject &routeOrigin,
+                               const QJsonObject &routeDest)
 {
     QStringList pairs;
     for (const QJsonValue &value : steps) {
@@ -92,6 +92,7 @@ QString buildPathJsonFromSteps(const QJsonArray &steps,
             }
             const QStringList ll = trimmed.split(QLatin1Char(','));
             if (ll.size() >= 2) {
+                // directionlite path：经度,纬度（bd09ll）
                 pairs << QStringLiteral("[%1,%2]")
                              .arg(ll.at(0).trimmed())
                              .arg(ll.at(1).trimmed());
@@ -99,8 +100,12 @@ QString buildPathJsonFromSteps(const QJsonArray &steps,
         }
     }
     if (pairs.isEmpty()) {
-        pairs << QStringLiteral("[%1,%2]").arg(originLng, 0, 'f', 6).arg(originLat, 0, 'f', 6)
-              << QStringLiteral("[%1,%2]").arg(destLng, 0, 'f', 6).arg(destLat, 0, 'f', 6);
+        const double oLng = routeOrigin.value(QStringLiteral("lng")).toDouble();
+        const double oLat = routeOrigin.value(QStringLiteral("lat")).toDouble();
+        const double dLng = routeDest.value(QStringLiteral("lng")).toDouble();
+        const double dLat = routeDest.value(QStringLiteral("lat")).toDouble();
+        pairs << QStringLiteral("[%1,%2]").arg(oLng, 0, 'f', 6).arg(oLat, 0, 'f', 6)
+              << QStringLiteral("[%1,%2]").arg(dLng, 0, 'f', 6).arg(dLat, 0, 'f', 6);
     }
     return QStringLiteral("[%1]").arg(pairs.join(QLatin1Char(',')));
 }
@@ -221,35 +226,39 @@ QString buildBaiduJsMapHtml(const QString &ak,
 <html><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html,body,#map{margin:0;padding:0;width:100%;height:100%;background:#edf2f9;touch-action:none;}</style>
-<script src="https://api.map.baidu.com/api?v=3.0&ak=%1"></script>
-</head><body><div id="map"></div>
+<style>html,body,#map{margin:0;padding:0;width:100%;height:100%;background:#edf2f9;}</style>
 <script>
-var map = new BMap.Map('map');
-map.enableScrollWheelZoom(true);
-map.enableDragging(true);
-map.enableDoubleClickZoom(true);
-map.enableInertialDragging(true);
-map.addControl(new BMap.NavigationControl({anchor: BMAP_ANCHOR_TOP_LEFT, type: BMAP_NAVIGATION_CONTROL_SMALL}));
-var routePath = %2;
-function drawOnMap(bdPts) {
+var map = null;
+window.__routePath = %2;
+function drawRoute(pathArr) {
+  if (!map || !pathArr || pathArr.length < 2) return;
+  var pts = pathArr.map(function(p) { return new BMap.Point(p[0], p[1]); });
   map.clearOverlays();
-  if (!bdPts || bdPts.length < 2) return;
-  var polyline = new BMap.Polyline(bdPts, {
+  map.addOverlay(new BMap.Polyline(pts, {
     strokeColor: '#2B6BFF', strokeWeight: 6, strokeOpacity: 0.95
-  });
-  map.addOverlay(polyline);
-  var mk1 = new BMap.Marker(bdPts[0]);
-  var mk2 = new BMap.Marker(bdPts[bdPts.length - 1]);
+  }));
+  var mk1 = new BMap.Marker(pts[0]);
+  var mk2 = new BMap.Marker(pts[pts.length - 1]);
   map.addOverlay(mk1);
   map.addOverlay(mk2);
   mk1.setLabel(new BMap.Label('%3', {offset: new BMap.Size(16, -10)}));
   mk2.setLabel(new BMap.Label('%4', {offset: new BMap.Size(16, -10)}));
-  map.setViewport(bdPts, {margins: [30, 30, 30, 30]});
+  map.setViewport(pts);
 }
-var bdPts = routePath.map(function(p) { return new BMap.Point(p[0], p[1]); });
-drawOnMap(bdPts);
-</script></body></html>)")
+function initBaiduMap() {
+  map = new BMap.Map('map');
+  map.enableScrollWheelZoom(true);
+  map.enableDragging(true);
+  map.enableDoubleClickZoom(true);
+  map.enableInertialDragging(true);
+  map.addControl(new BMap.NavigationControl({
+    anchor: BMAP_ANCHOR_TOP_LEFT, type: BMAP_NAVIGATION_CONTROL_SMALL
+  }));
+  drawRoute(window.__routePath);
+}
+</script>
+<script src="https://api.map.baidu.com/api?v=3.0&ak=%1&callback=initBaiduMap"></script>
+</head><body><div id="map"></div></body></html>)")
         .arg(ak, pathJson, jsStringLiteral(originName), jsStringLiteral(destName));
 }
 #endif
@@ -522,12 +531,21 @@ void MapNavigationDialog::fetchRoute()
             return;
         }
 
-        showNavigationResult(routes.first().toObject());
+        showNavigationResult(root.value(QStringLiteral("result")).toObject());
     });
 }
 
-void MapNavigationDialog::showNavigationResult(const QJsonObject &route)
+void MapNavigationDialog::showNavigationResult(const QJsonObject &result)
 {
+    const QJsonArray routes = result.value(QStringLiteral("routes")).toArray();
+    if (routes.isEmpty()) {
+        m_statusLabel->setText(QStringLiteral("未找到可用路线"));
+        return;
+    }
+
+    const QJsonObject route = routes.first().toObject();
+    const QJsonObject routeOrigin = result.value(QStringLiteral("origin")).toObject();
+    const QJsonObject routeDest = result.value(QStringLiteral("destination")).toObject();
     const int distM = route.value(QStringLiteral("distance")).toInt();
     const int durS = route.value(QStringLiteral("duration")).toInt();
     const QJsonArray steps = route.value(QStringLiteral("steps")).toArray();
@@ -556,7 +574,7 @@ void MapNavigationDialog::showNavigationResult(const QJsonObject &route)
 #ifdef CHARGE_USE_WEBENGINE
     if (m_webView) {
         m_mapStack->setCurrentWidget(m_webView);
-        loadInteractiveMap(steps);
+        loadInteractiveMap(steps, routeOrigin, routeDest);
     } else
 #endif
     {
@@ -576,22 +594,26 @@ void MapNavigationDialog::showNavigationResult(const QJsonObject &route)
 }
 
 #ifdef CHARGE_USE_WEBENGINE
-void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps)
+void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps,
+                                             const QJsonObject &routeOrigin,
+                                             const QJsonObject &routeDest)
 {
     if (!m_webView) {
         return;
     }
 
-    const QString pathJson = buildPathJsonFromSteps(steps,
-                                                    m_originLat, m_originLng,
-                                                    m_destLat, m_destLng);
+    const QString pathJson = buildPathJsonFromSteps(steps, routeOrigin, routeDest);
     const QString html = buildBaiduJsMapHtml(m_baiduAk, m_originDesc, m_destName, pathJson);
     m_webView->setHtml(html, QUrl(QStringLiteral("https://lbsyun.baidu.com/")));
 }
 #else
-void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps)
+void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps,
+                                             const QJsonObject &routeOrigin,
+                                             const QJsonObject &routeDest)
 {
     Q_UNUSED(steps);
+    Q_UNUSED(routeOrigin);
+    Q_UNUSED(routeDest);
 }
 #endif
 

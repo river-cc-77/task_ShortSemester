@@ -38,9 +38,11 @@ private:
     QString directionLiteUrl(NavMode mode) const;
     NavMode selectedMode() const;
     void fetchRoute();
-    void showNavigationResult(const QJsonObject &route);
+    void showNavigationResult(const QJsonObject &result);
     void loadStaticMap(const QJsonArray &steps);
-    void loadInteractiveMap(const QJsonArray &steps);
+    void loadInteractiveMap(const QJsonArray &steps,
+                            const QJsonObject &routeOrigin,
+                            const QJsonObject &routeDest);
 
     QString m_originDesc;
     double m_originLat = 0;
