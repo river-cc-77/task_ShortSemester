@@ -51,7 +51,7 @@ private:
     QLineEdit *m_addressEdit = nullptr;
     QPushButton *m_geocodeButton = nullptr;
     QNetworkAccessManager *m_netMgr = nullptr;
-    QString m_baiduAk = QStringLiteral(""); // 百度地图 AK，没有就留空（留空时只能用下拉预设区域）
+    QString m_baiduAk = QStringLiteral("pMd3Q5PqSmoVkn8UvYjbJy28GzeqM7hl"); // 百度地图 AK（留空时只能用下拉预设区域）
     QPushButton *m_profileButton = nullptr;
     QPushButton *m_orderButton = nullptr;
     QPushButton *m_favoriteButton = nullptr;
