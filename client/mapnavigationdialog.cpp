@@ -5,12 +5,8 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QPushButton>
 #include <QRadioButton>
-#include <QRegularExpression>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -24,26 +20,30 @@ QString encodeBaiduParam(const QString &raw)
 
 QString guessRegionFromAddress(const QString &address)
 {
-    static const QRegularExpression re(QStringLiteral("([\\u4e00-\\u9fa5]{2,10})市"));
-    const QRegularExpressionMatch match = re.match(address);
-    if (!match.hasMatch()) {
+    const int idx = address.indexOf(QChar(0x5E02)); // 「市」
+    if (idx <= 0) {
         return QString();
     }
-    return match.captured(1);
+    QString city = address.left(idx);
+    // 「广东省深圳市」取最后一个行政词（市名本身 2~4 字）
+    if (city.size() > 4) {
+        city = city.right(3);
+    }
+    return city;
 }
 
 QString buildBaiduDirectionUrl(double originLat, double originLng, const QString &originName,
                                double destLat, double destLng, const QString &destName,
                                MapNavigationDialog::NavMode mode, const QString &region)
 {
-    const QString originVal = QStringLiteral("latlng:%1,%2|name:%3")
+    const QString originVal = QStringLiteral("name:%1|latlng:%2,%3")
+                                  .arg(originName)
                                   .arg(originLat, 0, 'f', 6)
-                                  .arg(originLng, 0, 'f', 6)
-                                  .arg(originName);
-    const QString destVal = QStringLiteral("latlng:%1,%2|name:%3")
+                                  .arg(originLng, 0, 'f', 6);
+    const QString destVal = QStringLiteral("name:%1|latlng:%2,%3")
+                                .arg(destName)
                                 .arg(destLat, 0, 'f', 6)
-                                .arg(destLng, 0, 'f', 6)
-                                .arg(destName);
+                                .arg(destLng, 0, 'f', 6);
     const QString modeStr = mode == MapNavigationDialog::NavMode::Walking
                                 ? QStringLiteral("walking")
                                 : QStringLiteral("driving");
@@ -110,12 +110,14 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     modeLay->addStretch();
     layout->addWidget(modeBox);
 
-    m_statusLabel = new QLabel(QStringLiteral("正在加载路线…"), this);
+    m_statusLabel = new QLabel(
+        QStringLiteral("路线已就绪。选择出行方式后，点击「开始导航」将在外部地图中打开（起终点已预填）。"),
+        this);
     m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
 
     m_startBtn = new QPushButton(QStringLiteral("开始导航"), this);
-    m_startBtn->setEnabled(false);
+    m_startBtn->setEnabled(true);
     auto *closeBtn = new QPushButton(QStringLiteral("关闭"), this);
 
     auto *btnRow = new QHBoxLayout;
@@ -126,9 +128,6 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
 
     connect(m_startBtn, &QPushButton::clicked, this, &MapNavigationDialog::onStartNavigation);
     connect(closeBtn, &QPushButton::clicked, this, &QDialog::reject);
-
-    m_net = new QNetworkAccessManager(this);
-    checkRouteAvailability();
 }
 
 MapNavigationDialog::NavMode MapNavigationDialog::selectedMode() const
@@ -143,41 +142,13 @@ QString MapNavigationDialog::buildBaiduDirectionUrl(NavMode mode) const
                                     mode, m_region);
 }
 
-void MapNavigationDialog::checkRouteAvailability()
-{
-    m_statusLabel->setText(QStringLiteral("正在加载路线…"));
-    m_startBtn->setEnabled(false);
-
-    const QUrl url(buildBaiduDirectionUrl(NavMode::Driving));
-    QNetworkRequest request(url);
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                         QNetworkRequest::NoLessSafeRedirectPolicy);
-
-    QNetworkReply *reply = m_net->get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        reply->deleteLater();
-
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const bool ok = reply->error() == QNetworkReply::NoError
-                        && (httpStatus == 0 || httpStatus < 400);
-
-        if (ok) {
-            m_statusLabel->setText(QStringLiteral("路线已就绪。选择出行方式后，点击「开始导航」将在外部地图中打开（起终点已预填）。"));
-            m_startBtn->setEnabled(true);
-            return;
-        }
-
-        m_statusLabel->setText(QStringLiteral("导航加载失败，请检查网络"));
-        m_startBtn->setEnabled(false);
-    });
-}
-
 void MapNavigationDialog::onStartNavigation()
 {
     const QString navUrl = buildBaiduDirectionUrl(selectedMode());
     if (!QDesktopServices::openUrl(QUrl(navUrl))) {
+        m_statusLabel->setText(QStringLiteral("导航加载失败，请检查网络"));
         QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("无法打开外部地图，请检查系统默认浏览器。"));
+                             QStringLiteral("导航加载失败，请检查网络"));
         return;
     }
     accept();

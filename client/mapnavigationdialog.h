@@ -7,7 +7,6 @@
 class QLabel;
 class QPushButton;
 class QRadioButton;
-class QNetworkAccessManager;
 
 class MapNavigationDialog : public QDialog
 {
@@ -22,7 +21,6 @@ public:
                         QWidget *parent = nullptr);
 
 private slots:
-    void checkRouteAvailability();
     void onStartNavigation();
 
 private:
@@ -43,7 +41,6 @@ private:
     QRadioButton *m_drivingRadio = nullptr;
     QRadioButton *m_walkingRadio = nullptr;
     QPushButton *m_startBtn = nullptr;
-    QNetworkAccessManager *m_net = nullptr;
 };
 
 #endif // MAPNAVIGATIONDIALOG_H
