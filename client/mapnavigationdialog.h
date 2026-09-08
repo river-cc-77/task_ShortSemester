@@ -12,6 +12,7 @@ class QPushButton;
 class QRadioButton;
 class QStackedWidget;
 class QNetworkAccessManager;
+class QEvent;
 
 #ifdef CHARGE_USE_WEBENGINE
 class QWebEngineView;
@@ -29,6 +30,10 @@ public:
                         const QString &baiduAk,
                         const QString &destAddress = QString(),
                         QWidget *parent = nullptr);
+    ~MapNavigationDialog() override;
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
     void onStartNavigation();
@@ -42,6 +47,7 @@ private:
     NavMode selectedMode() const;
     void fetchRoute();
     void showNavigationResult(const QJsonObject &result);
+    void refitToParent(int designHeight);
     void loadStaticMap(const QJsonArray &steps);
     void loadInteractiveMap(const QJsonArray &steps,
                             const QJsonObject &routeOrigin,
@@ -71,6 +77,7 @@ private:
     QPushButton *m_startBtn = nullptr;
     QListWidget *m_stepsList = nullptr;
     QNetworkAccessManager *m_net = nullptr;
+    bool m_refitQueued = false;
 
 #ifdef CHARGE_USE_WEBENGINE
     QWebEngineView *m_webView = nullptr;

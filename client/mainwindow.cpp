@@ -357,7 +357,7 @@ void MainWindow::showStationDetail(int stationId)
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("充电站电桩详情"));
-    dlg.resize(childDialogSize(this, 560));   // 初始尺寸随当前窗口自适应，可再拖拽
+    fitChildDialog(&dlg, this, 560);   // 初始尺寸随当前窗口自适应，可再拖拽
 
     auto *lay = new QVBoxLayout(&dlg);
 
@@ -631,7 +631,7 @@ void MainWindow::onProfileCenter()
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("个人中心"));
-    dlg.resize(childDialogSize(this, 520));   // 初始尺寸随当前窗口自适应，可再拖拽
+    fitChildDialog(&dlg, this, 520);   // 初始尺寸随当前窗口自适应，可再拖拽
 
     auto *lay = new QVBoxLayout(&dlg);
 
@@ -770,7 +770,7 @@ void MainWindow::onProfileCenter()
     connect(rechargeBtn, &QPushButton::clicked, &dlg, [&]() {
         QDialog rechargeDlg(&dlg);
         rechargeDlg.setWindowTitle(QStringLiteral("余额充值"));
-        rechargeDlg.resize(childDialogSize(&dlg, 200));   // 随上级窗口自适应
+        fitChildDialog(&rechargeDlg, &dlg, 200);   // 随上级窗口自适应
 
         auto *rLay = new QVBoxLayout(&rechargeDlg);
         auto *curBalanceLabel = new QLabel(
@@ -851,7 +851,7 @@ void MainWindow::onOrderHistory()
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("订单历史"));
-    dlg.resize(childDialogSize(this, 640));   // 初始尺寸随当前窗口自适应，可再拖拽
+    fitChildDialog(&dlg, this, 640);   // 初始尺寸随当前窗口自适应，可再拖拽
 
     auto *lay = new QVBoxLayout(&dlg);
     auto *listWidget = new WrapListWidget(&dlg);
@@ -915,7 +915,7 @@ void MainWindow::onOrderHistory()
         // 订单详情弹窗
         QDialog detailDlg(&dlg);
         detailDlg.setWindowTitle(QStringLiteral("订单详情"));
-        detailDlg.resize(childDialogSize(&dlg, 460));   // 随上级窗口自适应
+        fitChildDialog(&detailDlg, &dlg, 460);   // 随上级窗口自适应
         auto *dLay = new QVBoxLayout(&detailDlg);
 
         auto *infoLabel = new QLabel(&detailDlg);
@@ -1004,7 +1004,7 @@ void MainWindow::onFavoriteList()
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("我的收藏"));
-    dlg.resize(childDialogSize(this, 560));   // 初始尺寸随当前窗口自适应，可再拖拽
+    fitChildDialog(&dlg, this, 560);   // 初始尺寸随当前窗口自适应，可再拖拽
 
     auto *lay = new QVBoxLayout(&dlg);
     auto *listWidget = new WrapListWidget(&dlg);
@@ -1110,7 +1110,7 @@ void MainWindow::onAnnouncementList()
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("系统公告"));
-    dlg.resize(childDialogSize(this, 520));
+    fitChildDialog(&dlg, this, 520);
 
     auto *lay = new QVBoxLayout(&dlg);
     auto *listWidget = new WrapListWidget(&dlg);
@@ -1164,7 +1164,7 @@ void MainWindow::onAnnouncementList()
         }
         QDialog detailDlg(&dlg);
         detailDlg.setWindowTitle(item->data(Qt::UserRole + 1).toString());
-        detailDlg.resize(childDialogSize(&dlg, 360));
+        fitChildDialog(&detailDlg, &dlg, 360);
         auto *detailLay = new QVBoxLayout(&detailDlg);
         auto *content = new QTextEdit(&detailDlg);
         content->setReadOnly(true);
@@ -1280,7 +1280,7 @@ bool MainWindow::checkOpenOrder(bool failClosed)
     // 自定义弹窗（替代 QMessageBox，方便加跳转按钮）
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("提示"));
-    dlg.resize(childDialogSize(this, 340));   // 初始尺寸随当前窗口自适应，可再拖拽
+    fitChildDialog(&dlg, this, 340);   // 初始尺寸随当前窗口自适应，可再拖拽
     auto *lay = new QVBoxLayout(&dlg);
     auto *label = new QLabel(&dlg);
     label->setWordWrap(true);
@@ -1366,7 +1366,7 @@ void MainWindow::showChargingProgress(const QString &orderNo)
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("充电中"));
-    dlg.resize(childDialogSize(this, 360));   // 初始尺寸随当前窗口自适应，可再拖拽
+    fitChildDialog(&dlg, this, 360);   // 初始尺寸随当前窗口自适应，可再拖拽
     dlg.setModal(true);
 
     auto *lay = new QVBoxLayout(&dlg);
@@ -1503,7 +1503,7 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("订单结算"));
-    dlg.resize(childDialogSize(this, 340));   // 初始尺寸随当前窗口自适应，可再拖拽
+    fitChildDialog(&dlg, this, 340);   // 初始尺寸随当前窗口自适应，可再拖拽
     dlg.setModal(true);
 
     auto *lay = new QVBoxLayout(&dlg);
@@ -1556,7 +1556,7 @@ void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amo
     connect(rechargeBtn, &QPushButton::clicked, &dlg, [&]() {
         QDialog rechargeDlg(&dlg);
         rechargeDlg.setWindowTitle(QStringLiteral("余额充值"));
-        rechargeDlg.resize(childDialogSize(&dlg, 200));
+        fitChildDialog(&rechargeDlg, &dlg, 200);
 
         auto *rLay = new QVBoxLayout(&rechargeDlg);
         auto *hint = new QLabel(

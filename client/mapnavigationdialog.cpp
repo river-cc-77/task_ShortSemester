@@ -18,6 +18,7 @@
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
 #include <QTextDocument>
+#include <QTextOption>
 #include <QAbstractTextDocumentLayout>
 #include <QAbstractItemView>
 #include <QPainter>
@@ -170,6 +171,9 @@ public:
 
         QTextDocument doc;
         doc.setDocumentMargin(0);
+        QTextOption wrapOpt;
+        wrapOpt.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        doc.setDefaultTextOption(wrapOpt);
         doc.setDefaultFont(option.font);
         doc.setPlainText(index.data(Qt::DisplayRole).toString());
         doc.setTextWidth(avail);
@@ -194,6 +198,9 @@ public:
 
         QTextDocument doc;
         doc.setDocumentMargin(0);
+        QTextOption wrapOpt;
+        wrapOpt.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        doc.setDefaultTextOption(wrapOpt);
         doc.setDefaultFont(option.font);
         doc.setPlainText(index.data(Qt::DisplayRole).toString());
         doc.setTextWidth(textRect.width());
@@ -277,6 +284,9 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     setObjectName(QStringLiteral("navDialog"));
     setWindowTitle(QStringLiteral("地图导航"));
     setAttribute(Qt::WA_StyledBackground, true);
+    // 无边框铺满客户端窗口：避免标题栏/边框使内容溢出父窗口
+    setWindowFlag(Qt::FramelessWindowHint, true);
+    setWindowModality(Qt::WindowModal);
 
     m_net = new QNetworkAccessManager(this);
     m_stack = new QStackedWidget(this);
@@ -402,7 +412,7 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
 
     m_mapStack = new QStackedWidget(m_navPage);
     m_mapStack->setObjectName(QStringLiteral("navMapStack"));
-    m_mapStack->setMinimumHeight(260);
+    m_mapStack->setMinimumHeight(160);
 
     m_mapLabel = new QLabel(m_mapStack);
     m_mapLabel->setObjectName(QStringLiteral("navMapPreview"));
@@ -431,7 +441,7 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
 
     m_stepsList = new NavStepsListWidget(m_navPage);
     m_stepsList->setObjectName(QStringLiteral("navStepsList"));
-    m_stepsList->setMinimumHeight(120);
+    m_stepsList->setMinimumHeight(88);
     navLay->addWidget(m_stepsList, 1);
 
     auto *backBtn = new QPushButton(QStringLiteral("返回"), m_navPage);
@@ -447,7 +457,54 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     rootLay->setContentsMargins(0, 0, 0, 0);
     rootLay->addWidget(m_stack);
 
-    fitDialogInParent(this, parent, 460);
+    refitToParent(460);
+
+    // 跟随父窗口（客户端主窗）变化：父窗 resize/move 时本导航窗实时重新铺满对齐，
+    // 使导航窗口尺寸始终与用户端窗口保持同步（而非只取打开瞬间的尺寸）。
+    if (QWidget *win = parent) {
+        win->installEventFilter(this);
+    }
+}
+
+void MapNavigationDialog::refitToParent(int)
+{
+    QWidget *parentWin = parentWidget();
+    if (!parentWin) {
+        return;
+    }
+    // 全程铺满客户端窗口：尺寸固定为父窗口客户区、位置锁定在父窗口原点，杜绝任何溢出。
+    const QSize full = parentWin->size();
+    setMinimumSize(full);
+    setMaximumSize(full);
+    resize(full);
+    move(parentWin->mapToGlobal(QPoint(0, 0)));
+}
+
+MapNavigationDialog::~MapNavigationDialog()
+{
+    if (QWidget *win = parentWidget()) {
+        win->removeEventFilter(this);
+    }
+}
+
+// 父窗口（客户端主窗）尺寸/位置变化时，本导航窗重新铺满对齐，做到与用户端窗口同步。
+bool MapNavigationDialog::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == parentWidget()) {
+        const QEvent::Type t = event->type();
+        if (t == QEvent::Resize || t == QEvent::Move) {
+            // 延迟到父窗口本次 resize/move 事件处理完毕后再重排，避免嵌套改动；
+            // 连续拖拽会产生大量 resize/move，用标志位合并为一次重排，防止抖动。
+            if (!m_refitQueued) {
+                m_refitQueued = true;
+                QTimer::singleShot(0, this, [this]() {
+                    m_refitQueued = false;
+                    refitToParent(0);
+                });
+            }
+        }
+    }
+    return QDialog::eventFilter(watched, event);
 }
 
 MapNavigationDialog::NavMode MapNavigationDialog::selectedMode() const
@@ -578,7 +635,7 @@ void MapNavigationDialog::showNavigationResult(const QJsonObject &result)
     }
 
     m_stack->setCurrentWidget(m_navPage);
-    fitDialogInParent(this, parentWidget(), 820);
+    refitToParent(820);
 #ifdef CHARGE_USE_WEBENGINE
     if (m_webView) {
         m_webView->setFocus(Qt::OtherFocusReason);
@@ -729,5 +786,5 @@ void MapNavigationDialog::onBackToSetup()
 {
     m_stack->setCurrentWidget(m_setupPage);
     m_statusLabel->setText(QStringLiteral("起终点已就绪，选择方式后点击「开始导航」。"));
-    fitDialogInParent(this, parentWidget(), 460);
+    refitToParent(460);
 }
