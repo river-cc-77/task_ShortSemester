@@ -233,7 +233,8 @@ def run_all(host: str, port: int) -> None:
     pending_no = open8002["data"]["order"]["order_no"]
 
     err(host, port, {"id": "TC-23", "cmd": "charge.reserve", "token": u8002["data"]["token"], "data": {"pile_no": "SZ005-01"}}, "TC-23 ORDER_EXISTS", "ORDER_EXISTS")
-    err(host, port, {"id": "TC-24", "cmd": "charge.reserve", "token": token, "data": {"pile_no": "SZ001-03"}}, "TC-24 PILE_FAULT", "PILE_FAULT")
+    fault_pile = ensure_fault_pile(host, port, admin_token)
+    err(host, port, {"id": "TC-24", "cmd": "charge.reserve", "token": token, "data": {"pile_no": fault_pile}}, "TC-24 PILE_FAULT", "PILE_FAULT")
 
     u8003 = ok(host, port, {"id": "TC-25a", "cmd": "user.login", "data": {"phone": "13800138003"}}, "TC-25 login 8003")
     token8003 = u8003["data"]["token"]

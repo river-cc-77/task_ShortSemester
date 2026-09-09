@@ -58,11 +58,11 @@ MODULES = [
         "module": "订单业务规则与边界",
         "feature": "待支付拦截、故障/占用桩预约、越权结算、非法状态转换、角色隔离。",
         "purpose": "验证协议拦截规则与错误码一致性。",
-        "precondition": "8002 有待支付订单；SZ001-03 为故障桩；8003 可登录。",
+        "precondition": "8002 有待支付订单；存在至少 1 根故障或可置故障的电桩；8003 可登录。",
         "cases": [
             ("TC-22", "8002 待支付检查", "order.check_open token=8002", "has_open=true，status=待支付"),
             ("TC-23", "有待支付禁止新预约", "8002 charge.reserve", "ORDER_EXISTS"),
-            ("TC-24", "故障桩不可预约", "8001 reserve SZ001-03", "PILE_FAULT"),
+            ("TC-24", "故障桩不可预约", "8001 reserve 故障桩 pile_no", "PILE_FAULT"),
             ("TC-25", "占用桩不可预约", "8003 占桩后 8001 再预约同桩", "PILE_BUSY"),
             ("TC-26", "越权结算他人订单", "8001 settle 8002 订单", "FORBIDDEN"),
             ("TC-27", "预约态禁止 stop", "预约订单 charge.stop", "INVALID_PARAM"),
