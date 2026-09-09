@@ -125,12 +125,22 @@ def cleanup_user_order(host: str, port: int, token: str, admin_token: str) -> No
         ok(host, port, {"id": "c1", "cmd": "charge.cancel", "token": token, "data": {"order_no": order_no}}, "cleanup cancel")
         return
     if status == "充电中":
-        ok(host, port, {"id": "c2", "cmd": "charge.stop", "token": token, "data": {"order_no": order_no}}, "cleanup stop")
+        stop = ok(host, port, {"id": "c2", "cmd": "charge.stop", "token": token, "data": {"order_no": order_no}}, "cleanup stop")
+        order["amount"] = stop["data"]["amount"]
         status = "待支付"
     if status == "待支付":
+        order = resp["data"]["order"]
         settle = send_request(host, port, {"id": "c3", "cmd": "charge.settle", "token": token, "data": {"order_no": order_no}})
-        if not settle.get("ok"):
-            ok(host, port, {"id": "c4", "cmd": "order.admin.settle", "token": admin_token, "data": {"order_no": order_no}}, "cleanup admin settle")
+        if settle.get("ok"):
+            return
+        if settle.get("error", {}).get("code") == "BALANCE_NOT_ENOUGH":
+            amount = float(order.get("amount") or 0)
+            profile = send_request(host, port, {"id": "c3p", "cmd": "user.profile.get", "token": token, "data": {}})
+            balance = float(profile.get("data", {}).get("balance", 0)) if profile.get("ok") else 0.0
+            if amount > balance:
+                need = round(amount - balance + 1.0, 2)
+                ok(host, port, {"id": "c3r", "cmd": "user.recharge", "token": token, "data": {"amount": need}}, "cleanup recharge")
+        ok(host, port, {"id": "c4", "cmd": "order.admin.settle", "token": admin_token, "data": {"order_no": order_no}}, "cleanup admin settle")
 
 
 def run_all(host: str, port: int) -> None:
@@ -319,15 +329,23 @@ def run_all(host: str, port: int) -> None:
     t8004 = u8004["data"]["token"]
     cleanup_user_order(host, port, t8004, admin_token)
     p48 = find_idle_pile(host, port, admin_token)
-    if p48:
-        on48 = ok(host, port, {"id": "TC-48b", "cmd": "charge.reserve", "token": t8004, "data": {"pile_no": p48}}, "TC-48 reserve")["data"]["order_no"]
-        ok(host, port, {"id": "TC-48c", "cmd": "charge.start", "token": t8004, "data": {"order_no": on48}}, "TC-48 start")
-        print("\n>>> TC-48 waiting 65s for charge amount...")
-        time.sleep(65)
-        ok(host, port, {"id": "TC-48d", "cmd": "charge.stop", "token": t8004, "data": {"order_no": on48}}, "TC-48 stop")
-        ok(host, port, {"id": "TC-48e", "cmd": "order.admin.settle", "token": admin_token, "data": {"order_no": on48}}, "TC-48 admin settle")
-    else:
-        print("WARN TC-48 skipped: no idle pile")
+    if not p48:
+        raise RuntimeError("TC-48 no idle pile")
+    on48 = ok(host, port, {"id": "TC-48b", "cmd": "charge.reserve", "token": t8004, "data": {"pile_no": p48}}, "TC-48 reserve")["data"]["order_no"]
+    ok(host, port, {"id": "TC-48c", "cmd": "charge.start", "token": t8004, "data": {"order_no": on48}}, "TC-48 start")
+    print("\n>>> TC-48 waiting 65s for charge amount > balance (8004)...")
+    time.sleep(65)
+    stop48 = ok(host, port, {"id": "TC-48d", "cmd": "charge.stop", "token": t8004, "data": {"order_no": on48}}, "TC-48 stop")
+    amount = float(stop48["data"]["amount"])
+    balance = float(
+        ok(host, port, {"id": "TC-48p", "cmd": "user.profile.get", "token": t8004, "data": {}}, "TC-48 profile")["data"]["balance"]
+    )
+    if amount <= balance:
+        raise RuntimeError(f"TC-48 setup: amount {amount} <= balance {balance}, pick faster pile or wait longer")
+    err(host, port, {"id": "TC-48f", "cmd": "charge.settle", "token": t8004, "data": {"order_no": on48}}, "TC-48 user settle insufficient", "BALANCE_NOT_ENOUGH")
+    need = round(amount - balance + 1.0, 2)
+    ok(host, port, {"id": "TC-48r", "cmd": "user.recharge", "token": t8004, "data": {"amount": need}}, "TC-48 recharge")
+    ok(host, port, {"id": "TC-48e", "cmd": "order.admin.settle", "token": admin_token, "data": {"order_no": on48}}, "TC-48 admin settle")
 
     pd_pile = find_idle_pile(host, port, admin_token)
     if not pd_pile:

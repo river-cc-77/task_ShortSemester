@@ -110,7 +110,7 @@ MODULES = [
             ("TC-45", "冻结用户 8003", "user.freeze user_id=3", "8003 登录失败"),
             ("TC-46", "解冻用户 8003", "user.freeze freeze=false", "8003 可再登录"),
             ("TC-47", "有待支付禁止冻结", "冻结 8002", "ok=false（有未完成单）"),
-            ("TC-48", "管理员代结算", "order.admin.settle 待支付单", "订单已完成，写代结算日志"),
+            ("TC-48", "管理员代结算", "8004 余额不足→用户 settle 失败→充值→admin.settle", "订单已完成，写代结算日志"),
             ("TC-49", "电桩详情", "pile.detail 闲置/预约桩", "含 current_order 字段"),
         ],
     },
