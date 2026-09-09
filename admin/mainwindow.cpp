@@ -741,7 +741,7 @@ void MainWindow::addPileRow(const QJsonObject &obj)
     QPushButton *btnRestart = nullptr;
     QPushButton *btnDel = makeOpButton(QStringLiteral("删除"), "danger", 56);
     QList<QPushButton*> opBtns{btnEdit};
-    if (pileStatus == QStringLiteral("闲置") || pileStatus == QStringLiteral("故障")) {
+    if (pileStatus == QStringLiteral("故障")) {
         btnRestart = makeOpButton(QStringLiteral("重启"), "warning", 56);
         opBtns << btnRestart;
     }

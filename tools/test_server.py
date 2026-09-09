@@ -481,7 +481,7 @@ def main() -> int:
     if new_station_id not in station_ids:
         raise RuntimeError("station.create id not found in station.admin.list")
 
-    # id=28 pile.restart — 远程重启闲置桩 SZ002-03，应写 operation_log
+    # id=28 pile.restart — 远程重启故障桩 SZ002-03（seed 为故障），应写 operation_log
     run_test(
         host, port,
         {"id": "28", "cmd": "pile.restart", "token": admin_token,

@@ -743,24 +743,49 @@ def test_admin_pile_page_api(host: str, port: int, token: str, admin_token: str)
         host,
         port,
         {
+            "id": "H5f",
+            "cmd": "pile.update",
+            "token": admin_token,
+            "data": {"pile_no": pile_no, "status": "故障"},
+        },
+        f"pile.update {pile_no} status 故障",
+    )
+
+    run_test(
+        host,
+        port,
+        {
             "id": "H6",
             "cmd": "pile.restart",
             "token": admin_token,
             "data": {"pile_no": pile_no},
         },
-        f"pile.restart idle {pile_no}",
+        f"pile.restart fault {pile_no}",
     )
     status_after_restart = db_query_scalar(
         db, "SELECT status FROM pile WHERE pile_no = ?", (pile_no,)
     )
     if status_after_restart != "闲置":
-        raise RuntimeError(f"after restart pile should stay 闲置, got {status_after_restart}")
+        raise RuntimeError(f"after restart fault pile should be 闲置, got {status_after_restart}")
 
     restart_action = db_query_scalar(
         db, "SELECT action FROM operation_log ORDER BY id DESC LIMIT 1"
     )
     if restart_action != "远程重启电桩":
         raise RuntimeError(f"pile.restart log expected 远程重启电桩, got {restart_action}")
+
+    run_test_error(
+        host,
+        port,
+        {
+            "id": "H6b",
+            "cmd": "pile.restart",
+            "token": admin_token,
+            "data": {"pile_no": pile_no},
+        },
+        f"pile.restart idle {pile_no} rejected",
+        "INVALID_PARAM",
+    )
 
     # restore power for repeat runs
     run_test(

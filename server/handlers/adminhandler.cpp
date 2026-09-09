@@ -102,17 +102,13 @@ QJsonObject AdminHandler::pileRestart(const QString &id, const QString &token, c
         return Protocol::makeError(id, "NOT_FOUND", "电桩不存在");
     }
 
-    // 使用中的电桩（预约/在用）不可重启；仅有他人待支付历史订单时不阻止
     const QString pileStatus = pileOpt.value().value("status").toString();
-    if (pileStatus == QStringLiteral("预约") || pileStatus == QStringLiteral("在用")) {
-        return Protocol::makeError(id, "INVALID_PARAM", "该电桩使用中，无法重启");
-    }
-    if (DbManager::instance().pileHasActiveOrders(pileNo)) {
-        return Protocol::makeError(id, "INVALID_PARAM", "该电桩使用中，无法重启");
+    if (pileStatus != QStringLiteral("故障")) {
+        return Protocol::makeError(id, "INVALID_PARAM", "仅故障状态的电桩可远程重启");
     }
 
     if (!DbManager::instance().restartPile(pileNo)) {
-        return Protocol::makeError(id, "DB_ERROR", "重启失败");
+        return Protocol::makeError(id, "DB_ERROR", "重启失败（电桩状态已变更或仍在使用中）");
     }
 
     // 写操作日志

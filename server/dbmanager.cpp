@@ -686,11 +686,22 @@ QJsonArray DbManager::fetchPiles(int stationId, const QString &status, const QSt
 
 bool DbManager::restartPile(const QString &pileNo)
 {
-    auto pileOpt = findPileByNo(pileNo);
-    if (!pileOpt.has_value()) {
-        return false;
-    }
-    return updatePileStatus(pileOpt.value().value("id").toInt(), QStringLiteral("闲置"));
+    return runInTransaction([&]() {
+        const auto pileOpt = findPileByNo(pileNo);
+        if (!pileOpt.has_value()) {
+            return false;
+        }
+        const QJsonObject pile = pileOpt.value();
+        const int pileId = pile.value(QStringLiteral("id")).toInt();
+        const QString status = pile.value(QStringLiteral("status")).toString();
+        if (status != QStringLiteral("故障")) {
+            return false;
+        }
+        if (pileHasActiveOrders(pileNo)) {
+            return false;
+        }
+        return updatePileStatus(pileId, QStringLiteral("闲置"), QStringLiteral("故障"));
+    });
 }
 
 bool DbManager::updatePile(const QString &pileNo, const QString &type,
