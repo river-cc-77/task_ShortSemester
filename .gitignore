@@ -85,7 +85,6 @@ desktop.ini
 tools/*
 !tools/test_*.py
 !tools/testcase_catalog.py
-!tools/generate_testcase_xls.py
 
 # TaskArrangement 原始 Excel 备份（本地参考，不提交）
 TaskArrangement_orig.xls
