@@ -23,10 +23,6 @@ import xlwt
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from testcase_catalog import AUTHOR, DATE, MODULES, PROJECT_NAME, VERSION
 
-DEFAULT_TEMPLATE = Path(
-    r"c:\Users\RiverCG\Downloads\学生成果物-第X组-项目名称\学生成果物-第X组-项目名称"
-    r"\第一阶段项目\03.项目文件\03测试用例.xls"
-)
 DEFAULT_OUTPUT = Path(__file__).resolve().parent.parent / "docs" / "03测试用例.xls"
 
 # 模板列宽（xlrd width 单位）
@@ -169,9 +165,9 @@ def parse_args(argv: list[str]) -> tuple[Path | None, list[Path], bool]:
             outputs.append(Path(argv[i]))
             i += 1
     if not outputs:
+        # 仅写仓库 docs/03测试用例.xls。若需额外复制到某交付目录，
+        # 显式传入该路径：python3 tools/generate_testcase_xls.py <另一路径.xls>
         outputs = [DEFAULT_OUTPUT]
-        if DEFAULT_TEMPLATE.parent.exists():
-            outputs.append(DEFAULT_TEMPLATE)
     return template, outputs, mark_passed
 
 
