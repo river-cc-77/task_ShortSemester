@@ -107,7 +107,9 @@ public:
                            const QString &targetId = QString(),
                            const QString &detail = QString());
     QJsonArray fetchOperationLogs(const QString &action, const QString &dateFrom,
-                                  const QString &dateTo, int limit);
+                                  const QString &dateTo, int limit,
+                                  const QString &keyword = QString(),
+                                  const QString &targetType = QString());
     bool writeWalletLog(int userId, double delta, const QString &reason, int orderId = 0);
 
 private:

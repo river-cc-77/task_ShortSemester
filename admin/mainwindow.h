@@ -6,6 +6,8 @@
 #include <QMap>
 class QPushButton;
 class QLabel;
+class QLineEdit;
+class QComboBox;
 #include "qcustomplot.h"
 #include "pileeditdialog.h"
 #include "pilestatusdialog.h"
@@ -100,6 +102,8 @@ private:
     QWidget *m_cardPileStatus = nullptr;
     QLabel *m_labPileStatusDetail = nullptr;
     QLabel *m_labPileHealth = nullptr;
+    QLineEdit *m_editLogKeyword = nullptr;
+    QComboBox *m_comboLogTargetType = nullptr;
     void resetAllBtnSelect();
     void refreshBtnStyle(QPushButton *btn);
     void drawRevenueChartFromJson(const QJsonArray& trendArr);

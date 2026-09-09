@@ -58,6 +58,11 @@ QJsonObject AdminHandler::login(const QString &id, const QJsonObject &data)
     const int adminId = admin.value("admin_id").toInt();
     const QString token = AuthManager::instance().createAdminToken(adminId);
 
+    DbManager::instance().writeOperationLog(
+        adminId, QStringLiteral("登录"),
+        QStringLiteral("admin"), username,
+        QStringLiteral("管理员登录成功"));
+
     QJsonObject responseData;
     responseData["token"] = token;
     responseData["admin_id"] = adminId;
@@ -169,19 +174,25 @@ QJsonObject AdminHandler::pileUpdate(const QString &id, const QString &token, co
         && DbManager::instance().pileHasOpenOrders(pileNo)) {
         return Protocol::makeError(id, "INVALID_PARAM", "该电桩存在未完成订单，无法修改");
     }
-    if (!status.isEmpty() && DbManager::instance().pileHasActiveOrders(pileNo)) {
-        return Protocol::makeError(id, "INVALID_PARAM", "该电桩使用中，无法修改状态");
-    }
 
     if (!DbManager::instance().updatePile(pileNo, type, powerKw, status)) {
         return Protocol::makeError(id, "DB_ERROR", "更新电桩失败");
     }
 
-    // 写操作日志
+    QStringList logParts;
+    if (!type.isEmpty()) {
+        logParts << QStringLiteral("type=%1").arg(type);
+    }
+    if (powerKw > 0) {
+        logParts << QStringLiteral("power=%1").arg(powerKw);
+    }
+    if (!status.isEmpty()) {
+        logParts << QStringLiteral("status=%1").arg(status);
+    }
     DbManager::instance().writeOperationLog(
         session.adminId, QStringLiteral("修改电桩"),
         QStringLiteral("pile"), pileNo,
-        QString("type=%1 power=%2 status=%3").arg(type).arg(powerKw).arg(status));
+        logParts.join(QStringLiteral(", ")));
 
     QJsonObject responseData;
     responseData["pile_no"] = pileNo;
@@ -325,9 +336,12 @@ QJsonObject AdminHandler::operationLogList(const QString &id, const QString &tok
     const QString action = data.value("action").toString().trimmed();
     const QString dateFrom = data.value("date_from").toString().trimmed();
     const QString dateTo = data.value("date_to").toString().trimmed();
+    const QString keyword = data.value("keyword").toString().trimmed();
+    const QString targetType = data.value("target_type").toString().trimmed();
     const int limit = data.value("limit").toInt(100);
 
     QJsonObject responseData;
-    responseData["items"] = DbManager::instance().fetchOperationLogs(action, dateFrom, dateTo, limit);
+    responseData["items"] = DbManager::instance().fetchOperationLogs(
+        action, dateFrom, dateTo, limit, keyword, targetType);
     return Protocol::makeSuccess(id, responseData);
 }

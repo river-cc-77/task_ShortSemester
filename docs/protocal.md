@@ -758,13 +758,17 @@ estimated_remain_seconds = ceil(max(0, 50 - kwh) × 3600 / power_kw)   // 演示
 ```json
 {
   "action": "代结算",
+  "target_type": "pile",
+  "keyword": "SZ001",
   "date_from": "2026-08-01",
   "date_to": "2026-09-30",
   "limit": 100
 }
 ```
 
-`action` 可省略表示全部。
+`action`、`target_type`、`keyword` 均可省略表示不限制。`keyword` 模糊匹配管理员账号、对象 ID、详情与操作类型。
+
+**action 枚举（与写库一致）：** 登录、新增/修改/删除电站、新增/修改/删除电桩、远程重启电桩、冻结/解冻用户、代结算、新增/修改/删除公告。
 
 **响应 items[]：** id, admin_id, admin_username, action, target_type, target_id, detail, created_at
 

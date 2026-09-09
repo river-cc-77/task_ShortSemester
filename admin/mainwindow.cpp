@@ -17,11 +17,10 @@
 #include <QLabel>
 #include <QFrame>
 #include <QBrush>
+#include <QComboBox>
 
 namespace {
 
-// 表格列宽策略：stretchCols 均分剩余宽度，contentCols 按内容自适应，
-// 操作列（opCol）固定为 opWidth，保证操作按钮永远有足够空间、不会挤在一起。
 void configureTable(QTableWidget *t,
                     const QVector<int> &stretchCols,
                     const QVector<int> &contentCols,
@@ -40,6 +39,41 @@ void configureTable(QTableWidget *t,
         t->setColumnWidth(opCol, opWidth);
     }
     header->setStretchLastSection(false);
+}
+
+void populateLogActionCombo(QComboBox *combo)
+{
+    combo->clear();
+    const QStringList actions = {
+        QStringLiteral("全部操作"),
+        QStringLiteral("登录"),
+        QStringLiteral("新增电站"),
+        QStringLiteral("修改电站"),
+        QStringLiteral("删除电站"),
+        QStringLiteral("新增电桩"),
+        QStringLiteral("修改电桩"),
+        QStringLiteral("删除电桩"),
+        QStringLiteral("远程重启电桩"),
+        QStringLiteral("冻结用户"),
+        QStringLiteral("解冻用户"),
+        QStringLiteral("代结算"),
+        QStringLiteral("新增公告"),
+        QStringLiteral("修改公告"),
+        QStringLiteral("删除公告"),
+    };
+    combo->addItems(actions);
+}
+
+void populateLogTargetTypeCombo(QComboBox *combo)
+{
+    combo->clear();
+    combo->addItem(QStringLiteral("全部对象"), QString());
+    combo->addItem(QStringLiteral("电站"), QStringLiteral("station"));
+    combo->addItem(QStringLiteral("电桩"), QStringLiteral("pile"));
+    combo->addItem(QStringLiteral("用户"), QStringLiteral("user"));
+    combo->addItem(QStringLiteral("订单"), QStringLiteral("order"));
+    combo->addItem(QStringLiteral("公告"), QStringLiteral("announcement"));
+    combo->addItem(QStringLiteral("管理员"), QStringLiteral("admin"));
 }
 
 // 表格操作列按钮：统一最小尺寸、手型光标与语义配色（btnType）
@@ -420,17 +454,18 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     connect(ui->btnStationAdd, &QPushButton::clicked, this, &MainWindow::onAddStationClicked);
 
     //==================== 操作日志初始化 ====================
-    ui->comboLogAction->addItem(QStringLiteral("全部操作"));
-    ui->comboLogAction->addItem(QStringLiteral("新增电站"));
-    ui->comboLogAction->addItem(QStringLiteral("修改电站"));
-    ui->comboLogAction->addItem(QStringLiteral("删除电站"));
-    ui->comboLogAction->addItem(QStringLiteral("新增电桩"));
-    ui->comboLogAction->addItem(QStringLiteral("修改电桩"));
-    ui->comboLogAction->addItem(QStringLiteral("删除电桩"));
-    ui->comboLogAction->addItem(QStringLiteral("远程重启电桩"));
-    ui->comboLogAction->addItem(QStringLiteral("冻结用户"));
-    ui->comboLogAction->addItem(QStringLiteral("解冻用户"));
-    ui->comboLogAction->addItem(QStringLiteral("代结算"));
+    populateLogActionCombo(ui->comboLogAction);
+
+    m_comboLogTargetType = new QComboBox(ui->widget_logFilter);
+    m_comboLogTargetType->setMinimumWidth(110);
+    populateLogTargetTypeCombo(m_comboLogTargetType);
+    ui->horizontalLayout_logFilter->insertWidget(1, m_comboLogTargetType);
+
+    m_editLogKeyword = new QLineEdit(ui->widget_logFilter);
+    m_editLogKeyword->setPlaceholderText(QStringLiteral("关键字(管理员/对象/详情)"));
+    m_editLogKeyword->setMinimumWidth(180);
+    ui->horizontalLayout_logFilter->insertWidget(5, m_editLogKeyword);
+
     ui->dateLogFrom->setCalendarPopup(true);
     ui->dateLogTo->setCalendarPopup(true);
     {
@@ -454,6 +489,15 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     ui->tableLog->setAlternatingRowColors(true);
 
     connect(ui->btnLogQuery, &QPushButton::clicked, this, [=]() {
+        reloadOperationLogList();
+    });
+    connect(m_editLogKeyword, &QLineEdit::returnPressed, this, [=]() {
+        reloadOperationLogList();
+    });
+    connect(ui->comboLogAction, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int) {
+        reloadOperationLogList();
+    });
+    connect(m_comboLogTargetType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int) {
         reloadOperationLogList();
     });
 
@@ -1578,14 +1622,37 @@ void MainWindow::reloadOperationLogList()
     m_logPager.page = 0;
     m_logItems = QJsonArray();
 
+    const QDate fromDate = ui->dateLogFrom->date();
+    const QDate toDate = ui->dateLogTo->date();
+    if (fromDate > toDate) {
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("开始日期不能晚于结束日期"));
+        renderLogPage();
+        return;
+    }
+
     QJsonObject params;
-    params[QStringLiteral("limit")] = 200;
-    params[QStringLiteral("date_from")] = ui->dateLogFrom->date().toString(QStringLiteral("yyyy-MM-dd"));
-    params[QStringLiteral("date_to")] = ui->dateLogTo->date().toString(QStringLiteral("yyyy-MM-dd"));
+    params[QStringLiteral("limit")] = 500;
+    params[QStringLiteral("date_from")] = fromDate.toString(QStringLiteral("yyyy-MM-dd"));
+    params[QStringLiteral("date_to")] = toDate.toString(QStringLiteral("yyyy-MM-dd"));
 
     const QString actionText = ui->comboLogAction->currentText();
     if (actionText != QStringLiteral("全部操作")) {
         params[QStringLiteral("action")] = actionText;
+    }
+
+    if (m_comboLogTargetType) {
+        const QString targetType = m_comboLogTargetType->currentData().toString();
+        if (!targetType.isEmpty()) {
+            params[QStringLiteral("target_type")] = targetType;
+        }
+    }
+
+    if (m_editLogKeyword) {
+        const QString keyword = m_editLogKeyword->text().trimmed();
+        if (!keyword.isEmpty()) {
+            params[QStringLiteral("keyword")] = keyword;
+        }
     }
 
     const QJsonObject resp = m_api->call(QStringLiteral("operation_log.list"), params);

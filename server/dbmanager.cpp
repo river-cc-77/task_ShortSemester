@@ -1669,7 +1669,9 @@ bool DbManager::writeOperationLog(int adminId, const QString &action,
 }
 
 QJsonArray DbManager::fetchOperationLogs(const QString &action, const QString &dateFrom,
-                                         const QString &dateTo, int limit)
+                                         const QString &dateTo, int limit,
+                                         const QString &keyword,
+                                         const QString &targetType)
 {
     QSqlQuery query(m_db);
     QString sql =
@@ -1681,11 +1683,18 @@ QJsonArray DbManager::fetchOperationLogs(const QString &action, const QString &d
     if (!action.isEmpty()) {
         sql += " AND o.action = :action";
     }
+    if (!targetType.isEmpty()) {
+        sql += " AND o.target_type = :target_type";
+    }
     if (!dateFrom.isEmpty()) {
         sql += " AND date(o.created_at) >= :date_from";
     }
     if (!dateTo.isEmpty()) {
         sql += " AND date(o.created_at) <= :date_to";
+    }
+    if (!keyword.isEmpty()) {
+        sql += " AND (o.detail LIKE :keyword OR o.target_id LIKE :keyword "
+               "OR a.username LIKE :keyword OR o.action LIKE :keyword)";
     }
     sql += " ORDER BY o.id DESC LIMIT :limit";
 
@@ -1693,11 +1702,17 @@ QJsonArray DbManager::fetchOperationLogs(const QString &action, const QString &d
     if (!action.isEmpty()) {
         query.bindValue(":action", action);
     }
+    if (!targetType.isEmpty()) {
+        query.bindValue(":target_type", targetType);
+    }
     if (!dateFrom.isEmpty()) {
         query.bindValue(":date_from", dateFrom);
     }
     if (!dateTo.isEmpty()) {
         query.bindValue(":date_to", dateTo);
+    }
+    if (!keyword.isEmpty()) {
+        query.bindValue(":keyword", QStringLiteral("%%1%").arg(keyword));
     }
     query.bindValue(":limit", limit > 0 ? limit : 100);
 
