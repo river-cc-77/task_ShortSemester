@@ -968,6 +968,22 @@ void MainWindow::onOrderHistory()
 
         // 根据状态显示对应操作按钮
         if (status == QStringLiteral("预约")) {
+            auto *cancelBtn = new QPushButton(QStringLiteral("取消预约"), &detailDlg);
+            cancelBtn->setStyleSheet(m_refreshButton->styleSheet());
+            btnRow->addWidget(cancelBtn);
+            connect(cancelBtn, &QPushButton::clicked, &detailDlg, [&, item]() {
+                detailDlg.hide();
+                if (cancelReservation(orderNo)) {
+                    delete listWidget->takeItem(listWidget->row(item));
+                    if (listWidget->count() == 0) {
+                        listWidget->addItem(QStringLiteral("暂无订单记录"));
+                    }
+                    detailDlg.accept();
+                } else {
+                    detailDlg.show();
+                }
+            });
+
             auto *startBtn = new QPushButton(QStringLiteral("开始充电"), &detailDlg);
             startBtn->setStyleSheet(m_refreshButton->styleSheet());
             btnRow->addWidget(startBtn);
