@@ -9,6 +9,7 @@
 
 用法：
   python3 tools/generate_testcase_xls.py [输出路径]
+  python3 tools/generate_testcase_xls.py --passed [输出路径]
   python3 tools/generate_testcase_xls.py --template <模板.xls> [输出路径]
 """
 
@@ -29,7 +30,7 @@ DEFAULT_TEMPLATE = Path(
 DEFAULT_OUTPUT = Path(__file__).resolve().parent.parent / "docs" / "03测试用例.xls"
 
 # 模板列宽（xlrd width 单位）
-COL_WIDTHS = [2464, 6048, 3360, 4192, 4384, 2720, 1696]
+COL_WIDTHS = [2464, 6048, 3360, 4192, 4384, 2720, 4800]
 # 模板行高：元信息行 500，表头/用例行见下
 META_ROW_HEIGHT = 500
 HEADER_ROW_HEIGHT = 720
@@ -71,7 +72,7 @@ def _write_merge(
     sh.write_merge(r1, r2, c1, c2, text, st["value"])
 
 
-def write_module_sheet(wb: xlwt.Workbook, sheet_idx: int, mod: dict) -> None:
+def write_module_sheet(wb: xlwt.Workbook, sheet_idx: int, mod: dict, *, test_result: str = "") -> None:
     """按模板写入一个功能模块页。"""
     # 工作表名：测试用例1 … 测试用例7（与模板主表名一致系列）
     sheet_name = f"测试用例{sheet_idx + 1}"
@@ -124,13 +125,15 @@ def write_module_sheet(wb: xlwt.Workbook, sheet_idx: int, mod: dict) -> None:
         sh.row(row).height = CASE_ROW_HEIGHTS[i]
         sh.write(row, 0, str(i + 1), st["case"])
         if i < len(cases):
-            case_id, desc, inp, expect = cases[i]
+            row_data = cases[i]
+            case_id, desc, inp, expect = row_data[:4]
+            remark = row_data[4] if len(row_data) > 4 else f"自动化 {case_id}"
             sh.write(row, 1, desc, st["case"])
             sh.write(row, 2, inp, st["case"])
             sh.write(row, 3, expect, st["case"])
-            sh.write(row, 4, "", st["case"])
+            sh.write(row, 4, test_result, st["case"])
             sh.write(row, 5, "", st["case"])
-            sh.write(row, 6, case_id, st["case"])  # 备注列写 TC-xx 便于对照自动化
+            sh.write(row, 6, remark, st["case"])
         else:
             for c in range(1, 7):
                 sh.write(row, c, "", st["case"])
@@ -142,21 +145,26 @@ def write_module_sheet(wb: xlwt.Workbook, sheet_idx: int, mod: dict) -> None:
             sh.write(row, c, "", st["case"])
 
 
-def build_workbook() -> xlwt.Workbook:
+def build_workbook(*, mark_passed: bool = False) -> xlwt.Workbook:
     wb = xlwt.Workbook(encoding="utf-8")
+    result = "通过" if mark_passed else ""
     for idx, mod in enumerate(MODULES):
-        write_module_sheet(wb, idx, mod)
+        write_module_sheet(wb, idx, mod, test_result=result)
     return wb
 
 
-def parse_args(argv: list[str]) -> tuple[Path | None, list[Path]]:
+def parse_args(argv: list[str]) -> tuple[Path | None, list[Path], bool]:
     template: Path | None = None
     outputs: list[Path] = []
+    mark_passed = False
     i = 0
     while i < len(argv):
         if argv[i] == "--template" and i + 1 < len(argv):
             template = Path(argv[i + 1])
             i += 2
+        elif argv[i] == "--passed":
+            mark_passed = True
+            i += 1
         else:
             outputs.append(Path(argv[i]))
             i += 1
@@ -164,15 +172,15 @@ def parse_args(argv: list[str]) -> tuple[Path | None, list[Path]]:
         outputs = [DEFAULT_OUTPUT]
         if DEFAULT_TEMPLATE.parent.exists():
             outputs.append(DEFAULT_TEMPLATE)
-    return template, outputs
+    return template, outputs, mark_passed
 
 
 def main() -> int:
-    template, out_paths = parse_args(sys.argv[1:])
+    template, out_paths, mark_passed = parse_args(sys.argv[1:])
     if template and not template.exists():
         print(f"Warning: template not found: {template}", file=sys.stderr)
 
-    wb = build_workbook()
+    wb = build_workbook(mark_passed=mark_passed)
     for path in out_paths:
         path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(str(path))
@@ -180,6 +188,8 @@ def main() -> int:
 
     print(f"Total cases: {sum(len(m['cases']) for m in MODULES)}")
     print(f"Sheets: {len(MODULES)} × 模板「测试用例」布局")
+    if mark_passed:
+        print("测试结果列: 通过")
     return 0
 
 
