@@ -98,7 +98,7 @@ def cleanup_user_order(host: str, port: int, token: str, admin_token: str) -> No
 
 
 def run_all(host: str, port: int) -> None:
-    total = sum(len(m["cases"]) for m in MODULES)
+    total = sum(len(m["cases"]) for m in MODULES)  # 49
 
     # ===== 模块1：连通与登录 TC-01~07 =====
     ok(host, port, {"id": "TC-01", "cmd": "ping", "data": {}}, "TC-01 ping")
