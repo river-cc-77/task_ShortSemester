@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import json
+import math
 import random
+import re
 import socket
 import struct
 import sys
@@ -21,6 +23,9 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_common import admin_default_date_range
 from testcase_catalog import MODULES
+
+# seed.sql 各站单价（pile_no 前缀 SZ00N 对应 station N）
+STATION_PRICES = {1: 1.20, 2: 1.60, 3: 1.50, 4: 1.30, 5: 1.10}
 
 
 def send_request(host: str, port: int, payload: dict) -> dict:
@@ -77,6 +82,47 @@ def find_idle_pile(host: str, port: int, admin_token: str, exclude: Optional[set
         if row.get("status") == "闲置" and no not in exclude:
             return no
     return None
+
+
+def _pile_station_id(pile_no: str) -> int:
+    m = re.match(r"^SZ(\d+)", pile_no)
+    return int(m.group(1)) if m else 0
+
+
+def find_idle_pile_max_bill_rate(
+    host: str, port: int, admin_token: str, exclude: Optional[set] = None,
+) -> Optional[tuple[str, float, float]]:
+    """选 power_kw × 单价 最大的闲置桩，便于 TC-48 快速产生超额费用。"""
+    exclude = exclude or set()
+    resp = send_request(
+        host, port,
+        {"id": "find_fast", "cmd": "pile.list", "token": admin_token, "data": {"status": "闲置"}},
+    )
+    if not resp.get("ok"):
+        return None
+    best: Optional[tuple[str, float, float, float]] = None
+    for row in resp["data"]["items"]:
+        no = row["pile_no"]
+        if row.get("status") != "闲置" or no in exclude:
+            continue
+        power = float(row.get("power_kw") or 0)
+        price = STATION_PRICES.get(_pile_station_id(no), 1.2)
+        rate = power * price
+        if best is None or rate > best[3]:
+            best = (no, power, price, rate)
+    if best is None:
+        return None
+    return best[0], best[1], best[2]
+
+
+def charge_seconds_to_exceed_balance(balance: float, power_kw: float, price: float) -> int:
+    """按服务端计费公式估算充电秒数，使 stop 后 amount > balance。"""
+    if power_kw <= 0 or price <= 0:
+        raise RuntimeError("invalid pile power/price for charge wait")
+    target = balance + 0.05  # 留余量应对四舍五入
+    kwh_needed = target / price
+    seconds = math.ceil(kwh_needed * 3600.0 / power_kw)
+    return max(seconds + 3, 10)
 
 
 def find_fault_pile(host: str, port: int, admin_token: str, exclude: Optional[set] = None) -> Optional[str]:
@@ -329,20 +375,22 @@ def run_all(host: str, port: int) -> None:
     u8004 = ok(host, port, {"id": "TC-48a", "cmd": "user.login", "data": {"phone": "13800138004"}}, "TC-48 login 8004")
     t8004 = u8004["data"]["token"]
     cleanup_user_order(host, port, t8004, admin_token)
-    p48 = find_idle_pile(host, port, admin_token)
-    if not p48:
+    balance = float(
+        ok(host, port, {"id": "TC-48p0", "cmd": "user.profile.get", "token": t8004, "data": {}}, "TC-48 profile before")["data"]["balance"]
+    )
+    picked = find_idle_pile_max_bill_rate(host, port, admin_token)
+    if not picked:
         raise RuntimeError("TC-48 no idle pile")
+    p48, power_kw, price = picked
+    wait_s = charge_seconds_to_exceed_balance(balance, power_kw, price)
     on48 = ok(host, port, {"id": "TC-48b", "cmd": "charge.reserve", "token": t8004, "data": {"pile_no": p48}}, "TC-48 reserve")["data"]["order_no"]
     ok(host, port, {"id": "TC-48c", "cmd": "charge.start", "token": t8004, "data": {"order_no": on48}}, "TC-48 start")
-    print("\n>>> TC-48 waiting 65s for charge amount > balance (8004)...")
-    time.sleep(65)
+    print(f"\n>>> TC-48 waiting {wait_s}s on {p48} ({power_kw}kW @ {price}/kWh) for amount > balance {balance}...")
+    time.sleep(wait_s)
     stop48 = ok(host, port, {"id": "TC-48d", "cmd": "charge.stop", "token": t8004, "data": {"order_no": on48}}, "TC-48 stop")
     amount = float(stop48["data"]["amount"])
-    balance = float(
-        ok(host, port, {"id": "TC-48p", "cmd": "user.profile.get", "token": t8004, "data": {}}, "TC-48 profile")["data"]["balance"]
-    )
     if amount <= balance:
-        raise RuntimeError(f"TC-48 setup: amount {amount} <= balance {balance}, pick faster pile or wait longer")
+        raise RuntimeError(f"TC-48 setup: amount {amount} <= balance {balance} after {wait_s}s on {p48}")
     err(host, port, {"id": "TC-48f", "cmd": "charge.settle", "token": t8004, "data": {"order_no": on48}}, "TC-48 user settle insufficient", "BALANCE_NOT_ENOUGH")
     need = round(amount - balance + 1.0, 2)
     ok(host, port, {"id": "TC-48r", "cmd": "user.recharge", "token": t8004, "data": {"amount": need}}, "TC-48 recharge")
