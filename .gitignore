@@ -88,3 +88,7 @@ tools/*
 # TaskArrangement 原始 Excel 备份（本地参考，不提交）
 TaskArrangement_orig.xls
 TaskArrangement_orig.bin
+
+# 测试用例 Excel（由 tools/generate_testcase_xls.py 本地生成/填写，不提交）
+docs/03测试用例*.xls
+*测试用例*.xls
