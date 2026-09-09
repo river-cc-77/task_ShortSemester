@@ -5,6 +5,7 @@
 #include <QMainWindow>
 #include <QMap>
 class QPushButton;
+class QLabel;
 #include "qcustomplot.h"
 #include "pileeditdialog.h"
 #include "pilestatusdialog.h"
@@ -13,6 +14,7 @@ class QPushButton;
 #include "stationeditdialog.h"
 #include "stationdetaildialog.h"
 #include "announcementeditdialog.h"
+#include "paginationutil.h"
 class ApiClient;
 namespace Ui {
 class MainWindow;
@@ -68,12 +70,36 @@ private slots:
     // 电桩编辑弹窗槽函数
     void onEditPileBtnClicked(const QString& pileNo);
 
+    void setupPagination();
+    void renderUserPage();
+    void renderPilePage();
+    void renderOrderPage();
+    void renderStationPage();
+    void renderLogPage();
+    void renderAnnouncementPage();
+    void updatePileStatusOverview(const QJsonObject &pileStat, int pileTotal, double healthRate);
+
 private:
     Ui::MainWindow *ui;
     ApiClient *m_api = nullptr;
     bool m_refreshBusy = false;
     QJsonArray m_stationItems;
+    QJsonArray m_userItems;
+    QJsonArray m_pileItems;
+    QJsonArray m_orderItems;
+    QJsonArray m_stationFilteredItems;
+    QJsonArray m_logItems;
+    QJsonArray m_announceItems;
     QMap<int, int> m_forecastMinIdle;
+    ListPager m_userPager;
+    ListPager m_pilePager;
+    ListPager m_orderPager;
+    ListPager m_stationPager;
+    ListPager m_logPager;
+    ListPager m_announcePager;
+    QWidget *m_cardPileStatus = nullptr;
+    QLabel *m_labPileStatusDetail = nullptr;
+    QLabel *m_labPileHealth = nullptr;
     void resetAllBtnSelect();
     void refreshBtnStyle(QPushButton *btn);
     void drawRevenueChartFromJson(const QJsonArray& trendArr);

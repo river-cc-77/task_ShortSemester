@@ -26,6 +26,9 @@ public:
     // 预约电桩
     static QJsonObject reserve(const QString &id, const QString &token, const QJsonObject &data);
 
+    // 取消预约（仅「预约」态）
+    static QJsonObject cancel(const QString &id, const QString &token, const QJsonObject &data);
+
     // 开始充电
     static QJsonObject start(const QString &id, const QString &token, const QJsonObject &data);
 

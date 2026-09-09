@@ -117,6 +117,7 @@
 | `order.check_open` | 用户端 | P1 | 检查未完成订单 |
 | `order.list` | 用户端/管理端 | P1 | 订单列表 |
 | `charge.reserve` | 用户端 | P1 | 预约电桩 |
+| `charge.cancel` | 用户端 | P1 | 取消预约 |
 | `charge.start` | 用户端 | P1 | 开始充电 |
 | `charge.stop` | 用户端 | P1 | 停止充电 |
 | `charge.settle` | 用户端/管理端 | P1 | 结算订单 |
@@ -403,6 +404,20 @@
 
 ---
 
+### 4.5.1 `charge.cancel`
+
+**请求 data：** `{ "order_no": "CD20260828003" }`
+
+**逻辑：**
+
+1. 订单须为「预约」且属于当前用户
+2. 删除预约订单（协议无「已取消」态，同超时取消）
+3. 电桩 `预约` → `闲置`
+
+**响应 data：** `{ "order_no": "CD20260828003", "status": "已取消" }`
+
+---
+
 ### 4.6 `charge.start`
 
 **请求 data：** `{ "order_no": "CD20260828003" }`
@@ -451,6 +466,7 @@
 ```
 kwh = power_kw × elapsed_seconds / 3600
 amount = round(kwh × station.price, 2)
+estimated_remain_seconds = ceil(max(0, 50 - kwh) × 3600 / power_kw)   // 演示目标 50 kWh
 ```
 
 > 演示加速：可在服务端配置 `time_scale = 60`（1 真实秒 = 1 模拟分钟）。

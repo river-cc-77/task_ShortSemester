@@ -1295,6 +1295,33 @@ void DbManager::cancelExpiredReservations()
     }
 }
 
+bool DbManager::cancelReservation(const QString &orderNo, int userId)
+{
+    return runInTransaction([&]() {
+        QSqlQuery q(m_db);
+        q.prepare("SELECT pile_id, status, user_id FROM charge_order WHERE order_no = :no");
+        q.bindValue(":no", orderNo);
+        if (!q.exec() || !q.next()) {
+            return false;
+        }
+        if (q.value("user_id").toInt() != userId) {
+            return false;
+        }
+        if (q.value("status").toString() != QStringLiteral("预约")) {
+            return false;
+        }
+        const int pileId = q.value("pile_id").toInt();
+
+        QSqlQuery del(m_db);
+        del.prepare("DELETE FROM charge_order WHERE order_no = :no AND status = '预约'");
+        del.bindValue(":no", orderNo);
+        if (!del.exec() || del.numRowsAffected() == 0) {
+            return false;
+        }
+        return updatePileStatus(pileId, QStringLiteral("闲置"), QStringLiteral("预约"));
+    });
+}
+
 // ============================================================
 // 统计
 // ============================================================
@@ -1392,6 +1419,15 @@ QJsonObject DbManager::fetchStatsOverview(int days)
     while (pileStatusQuery.next()) {
         pileStatus[pileStatusQuery.value("status").toString()] = pileStatusQuery.value("cnt").toInt();
     }
+    int pileTotal = 0;
+    for (const QString &status : allPileStatuses) {
+        pileTotal += pileStatus.value(status).toInt();
+    }
+    result["pile_total"] = pileTotal;
+    const int faultCount = pileStatus.value(QStringLiteral("故障")).toInt();
+    result["pile_health_rate"] = pileTotal > 0
+        ? qRound((pileTotal - faultCount) * 1000.0 / pileTotal) / 1000.0
+        : 1.0;
     result["pile_status"] = pileStatus;
 
     // 站点营收排名

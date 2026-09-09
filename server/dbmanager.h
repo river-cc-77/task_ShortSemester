@@ -81,6 +81,7 @@ public:
     bool stopCharge(const QString &orderNo, int pileId, const QString &endAt,
                     double kwh, double amount);
     void cancelExpiredReservations();
+    bool cancelReservation(const QString &orderNo, int userId);
 
     // ===== 统计 =====
     QJsonObject fetchStatsOverview(int days);

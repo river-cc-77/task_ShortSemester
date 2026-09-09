@@ -61,6 +61,21 @@ void calcCharge(const QJsonObject &order, double &kwh, double &amount,
     amount = std::round(kwh * price * 100.0) / 100.0;
 }
 
+// 演示目标电量 50 kWh，估算剩余充电秒数
+qint64 calcEstimatedRemainSeconds(const QJsonObject &order, double currentKwh)
+{
+    constexpr double kTargetKwh = 50.0;
+    const double powerKw = order.value("power_kw").toDouble();
+    if (powerKw <= 0.0) {
+        return 0;
+    }
+    const double remainKwh = kTargetKwh - currentKwh;
+    if (remainKwh <= 0.0) {
+        return 0;
+    }
+    return static_cast<qint64>(std::ceil(remainKwh * 3600.0 / powerKw));
+}
+
 } // namespace
 
 static QJsonObject settleCore(const QString &id, const SessionInfo &session, const QJsonObject &data)
@@ -221,6 +236,44 @@ QJsonObject OrderHandler::reserve(const QString &id, const QString &token, const
 }
 
 // ============================================================
+// charge.cancel — 用户取消预约
+// ============================================================
+QJsonObject OrderHandler::cancel(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    const QJsonObject auth = authUser(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    DbManager::instance().cancelExpiredReservations();
+
+    const QString orderNo = data.value("order_no").toString().trimmed();
+    if (orderNo.isEmpty()) {
+        return Protocol::makeError(id, "INVALID_PARAM", "缺少 order_no");
+    }
+
+    const auto orderOpt = DbManager::instance().findOrderByNo(orderNo);
+    if (!orderOpt.has_value()) {
+        return Protocol::makeError(id, "NOT_FOUND", "订单不存在");
+    }
+    const QJsonObject order = orderOpt.value();
+    if (order.value("user_id").toInt() != session.userId) {
+        return Protocol::makeError(id, "FORBIDDEN", "无权操作此订单");
+    }
+    if (order.value("status").toString() != QStringLiteral("预约")) {
+        return Protocol::makeError(id, "INVALID_PARAM", "仅预约中的订单可取消");
+    }
+
+    if (!DbManager::instance().cancelReservation(orderNo, session.userId)) {
+        return Protocol::makeError(id, "DB_ERROR", "取消预约失败");
+    }
+
+    QJsonObject responseData;
+    responseData["order_no"] = orderNo;
+    responseData["status"] = QStringLiteral("已取消");
+    return Protocol::makeSuccess(id, responseData);
+}
+
+// ============================================================
 // charge.start — 开始充电
 // ============================================================
 QJsonObject OrderHandler::start(const QString &id, const QString &token, const QJsonObject &data)
@@ -300,16 +353,15 @@ QJsonObject OrderHandler::progress(const QString &id, const QString &token, cons
     double kwh = 0.0;
     double amount = 0.0;
     qint64 elapsedSeconds = 0;
+    qint64 estimatedRemain = 0;
 
     if (order.value("status").toString() == QStringLiteral("充电中")) {
         calcCharge(order, kwh, amount, elapsedSeconds);
+        estimatedRemain = calcEstimatedRemainSeconds(order, kwh);
     } else {
         kwh = order.value("kwh").toDouble();
         amount = order.value("amount").toDouble();
     }
-
-    // 估算剩余时间（假设充到 50 度，演示用）
-    const qint64 estimatedRemain = 0; // 简化：不估算
 
     QJsonObject responseData;
     responseData["order_no"] = orderNo;

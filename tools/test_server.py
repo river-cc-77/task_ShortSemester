@@ -358,6 +358,28 @@ def main() -> int:
         )
         order_no = reserve["data"]["order_no"]
 
+        # id=15b charge.cancel — 用户取消预约，桩恢复闲置
+        run_test(
+            host, port,
+            {"id": "15b", "cmd": "charge.cancel", "token": token, "data": {"order_no": order_no}},
+            "charge.cancel",
+        )
+        open_after_cancel = run_test(
+            host, port,
+            {"id": "15c", "cmd": "order.check_open", "token": token, "data": {}},
+            "order.check_open after cancel",
+        )
+        if open_after_cancel["data"].get("has_open"):
+            raise RuntimeError("order still open after charge.cancel")
+
+        # 重新预约以便继续主流程
+        reserve = run_test(
+            host, port,
+            {"id": "15d", "cmd": "charge.reserve", "token": token, "data": {"pile_no": pile_no}},
+            "charge.reserve (after cancel)",
+        )
+        order_no = reserve["data"]["order_no"]
+
         # id=16 charge.start — 开始充电，订单→充电中，桩→在用
         run_test(
             host, port,
@@ -366,11 +388,13 @@ def main() -> int:
         )
 
         # id=17 charge.progress — 查询实时电量/金额/进度
-        run_test(
+        progress = run_test(
             host, port,
             {"id": "17", "cmd": "charge.progress", "token": token, "data": {"order_no": order_no}},
             "charge.progress",
         )
+        if progress["data"].get("estimated_remain_seconds", 0) <= 0:
+            raise RuntimeError("charge.progress missing estimated_remain_seconds")
 
         # id=18 charge.stop — 停止充电，订单→待支付，返回 amount
         stop = run_test(

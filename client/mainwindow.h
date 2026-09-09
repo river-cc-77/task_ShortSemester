@@ -39,6 +39,7 @@ private:
     void updateUserHeaderLabel(); // 刷新顶部欢迎/余额栏
     QJsonObject fetchOrderByNo(const QString &orderNo); // 从服务端拉取最新订单快照
     bool checkOpenOrder(bool failClosed = false);   // 检查未完成订单，有则弹窗提示并返回 true
+    bool cancelReservation(const QString &orderNo); // 用户取消预约
     void showChargingProgress(const QString &orderNo);   // 充电中页面
     void showSettleDialog(const QString &orderNo, double kwh, double amount);  // 结算页面
 

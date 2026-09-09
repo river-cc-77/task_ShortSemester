@@ -413,7 +413,7 @@ QWidget#widget_2, QWidget#widget_top_bar, QWidget#widget_chart {
 
 /* ------------------------- 总览统计卡片 ------------------------- */
 QWidget#card1, QWidget#card2, QWidget#card3, QWidget#card4,
-QWidget#card5, QWidget#card6 {
+QWidget#card5, QWidget#card6, QWidget#cardPileStatus {
     background-color: #FFFFFF;
     border: 1px solid #E3EAF4;
     border-radius: 12px;
@@ -425,6 +425,7 @@ QWidget#card3 { border-left: 4px solid #18B46B; }
 QWidget#card4 { border-left: 4px solid #FF9F43; }
 QWidget#card5 { border-left: 4px solid #9B6FE8; }
 QWidget#card6 { border-left: 4px solid #FF5B8A; }
+QWidget#cardPileStatus { border-left: 4px solid #00B894; }
 
 QLabel#labTitleIncome, QLabel#labTitleOrder, QLabel#labTitleOnline,
 QLabel#labTitleUser, QLabel#labTitleMonthIncome, QLabel#labTitleTotalIncome {

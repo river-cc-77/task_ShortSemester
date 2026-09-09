@@ -7,6 +7,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QHBoxLayout>
+#include <QVBoxLayout>
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QSet>
@@ -308,10 +309,7 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
         }
     });
 
-    reloadUserList("");
-    reloadOverviewStat();
-
-    //==================== 电桩表格初始化【已修复：增加列数、表头】 ====================
+    //==================== 电桩表格初始化 ====================
     ui->tableWidgetPile->setColumnCount(8);
     QStringList pileHeaders = {
         "电桩编号",
@@ -477,6 +475,23 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     connect(ui->btnAnnouncementAdd, &QPushButton::clicked, this, &MainWindow::onAddAnnouncementClicked);
     connect(ui->btnAnnouncementRefresh, &QPushButton::clicked, this, &MainWindow::reloadAnnouncementList);
 
+    m_cardPileStatus = new QWidget(ui->page_0);
+    m_cardPileStatus->setObjectName(QStringLiteral("cardPileStatus"));
+    auto *pileStatusLay = new QVBoxLayout(m_cardPileStatus);
+    pileStatusLay->setContentsMargins(16, 12, 16, 12);
+    auto *pileStatusTitle = new QLabel(QStringLiteral("电桩状态分布与健康度"), m_cardPileStatus);
+    pileStatusTitle->setObjectName(QStringLiteral("labPileStatusTitle"));
+    m_labPileStatusDetail = new QLabel(m_cardPileStatus);
+    m_labPileStatusDetail->setWordWrap(true);
+    m_labPileHealth = new QLabel(m_cardPileStatus);
+    pileStatusLay->addWidget(pileStatusTitle);
+    pileStatusLay->addWidget(m_labPileStatusDetail);
+    pileStatusLay->addWidget(m_labPileHealth);
+    ui->gridLayout->addWidget(m_cardPileStatus, 4, 0, 1, 2);
+
+    setupPagination();
+    reloadUserList("");
+    reloadOverviewStat();
 }
 
 MainWindow::~MainWindow()
@@ -504,7 +519,8 @@ void MainWindow::refreshBtnStyle(QPushButton *btn)
 
 void MainWindow::reloadUserList(const QString &keyword)
 {
-    ui->tableUser->setRowCount(0);
+    m_userPager.page = 0;
+    m_userItems = QJsonArray();
 #if 1
 // ========== 真实后端 user.admin.list ==========
     QJsonObject param;
@@ -514,17 +530,14 @@ void MainWindow::reloadUserList(const QString &keyword)
     if (!resp["ok"].toBool())
     {
         QMessageBox::warning(this, "错误", "获取用户列表失败");
+        renderUserPage();
         return;
     }
     QJsonObject dataObj = resp["data"].toObject();
-    QJsonArray items = dataObj["items"].toArray();
-    if (items.isEmpty() && !keyword.isEmpty())
+    m_userItems = dataObj["items"].toArray();
+    if (m_userItems.isEmpty() && !keyword.isEmpty())
     {
         QMessageBox::information(this, "提示", "未找到相关用户");
-    }
-    for (auto obj : items)
-    {
-        addUserRow(obj.toObject());
     }
 #else
 // ========== Mock模拟（调试UI用，字段对齐协议） ==========
@@ -557,9 +570,10 @@ void MainWindow::reloadUserList(const QString &keyword)
     }
     for(auto o : arr)
     {
-        addUserRow(o.toObject());
+        m_userItems.append(o);
     }
 #endif
+    renderUserPage();
 }
 
 void MainWindow::onUserFreezeClick(int userId, bool wantFreeze)
@@ -647,6 +661,17 @@ void MainWindow::reloadOverviewStat()
     // ==========新增：本月营收、累计总营收赋值 ==========
     ui->labMonthIncome->setText(QString::number(d["month_revenue"].toDouble()));
     ui->labTotalIncome->setText(QString::number(d["total_revenue"].toDouble()));
+
+    const int pileTotal = d.value(QStringLiteral("pile_total")).toInt(
+        pileStat.value(QStringLiteral("闲置")).toInt(0)
+        + pileStat.value(QStringLiteral("预约")).toInt(0)
+        + pileStat.value(QStringLiteral("在用")).toInt(0)
+        + pileStat.value(QStringLiteral("故障")).toInt(0));
+    const double healthRate = d.value(QStringLiteral("pile_health_rate")).toDouble(
+        pileTotal > 0
+            ? (pileTotal - pileStat.value(QStringLiteral("故障")).toInt(0)) / static_cast<double>(pileTotal)
+            : 1.0);
+    updatePileStatusOverview(pileStat, pileTotal, healthRate);
 }
 
 
@@ -675,7 +700,8 @@ void MainWindow::loadStationCombo()
 
 void MainWindow::reloadPileList()
 {
-    ui->tableWidgetPile->setRowCount(0);
+    m_pilePager.page = 0;
+    m_pileItems = QJsonArray();
     QJsonObject params;
     QString pileRaw = ui->lineEditPileId->text();
     QString pileNo = pileRaw.trimmed();
@@ -706,13 +732,12 @@ void MainWindow::reloadPileList()
         const QString errMsg = resp["error"].toObject()["message"].toString(
             QStringLiteral("获取电桩列表失败"));
         QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        renderPilePage();
         return;
     }
-    QJsonArray items = resp["data"].toObject()["items"].toArray();
-    qDebug()<<"返回电桩数量："<<items.size();
-    for (auto item : items) {
-        addPileRow(item.toObject());
-    }
+    m_pileItems = resp["data"].toObject()["items"].toArray();
+    qDebug()<<"返回电桩数量："<<m_pileItems.size();
+    renderPilePage();
 }
 
 void MainWindow::addPileRow(const QJsonObject &obj)
@@ -1193,10 +1218,11 @@ void MainWindow::onAddPileClicked()
 
 void MainWindow::reloadOrderList()
 {
-    ui->tableOrder->setRowCount(0);
+    m_orderPager.page = 0;
+    m_orderItems = QJsonArray();
 
     QJsonObject params;
-    params["limit"] = 50;
+    params["limit"] = 500;
 
     const QString statusText = ui->comboOrderStatus->currentText();
     if (statusText != QStringLiteral("全部状态")) {
@@ -1216,13 +1242,12 @@ void MainWindow::reloadOrderList()
         const QString errMsg = resp.value("error").toObject().value("message").toString(
             QStringLiteral("获取订单列表失败"));
         QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        renderOrderPage();
         return;
     }
 
-    const QJsonArray items = resp.value("data").toObject().value("items").toArray();
-    for (const QJsonValue &value : items) {
-        addOrderRow(value.toObject());
-    }
+    m_orderItems = resp.value("data").toObject().value("items").toArray();
+    renderOrderPage();
 }
 
 void MainWindow::addOrderRow(const QJsonObject &obj)
@@ -1312,7 +1337,8 @@ void MainWindow::onOrderAdminSettle(const QString &orderNo)
 
 void MainWindow::reloadStationList()
 {
-    ui->tableStation->setRowCount(0);
+    m_stationPager.page = 0;
+    m_stationFilteredItems = QJsonArray();
     m_stationItems = QJsonArray();
 
     const QJsonObject resp = m_api->call(QStringLiteral("station.admin.list"));
@@ -1321,6 +1347,7 @@ void MainWindow::reloadStationList()
                                    .value(QStringLiteral("message")).toString(
                                        QStringLiteral("获取电站列表失败"));
         QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        renderStationPage();
         return;
     }
 
@@ -1352,8 +1379,9 @@ void MainWindow::reloadStationList()
                 continue;
             }
         }
-        addStationRow(obj);
+        m_stationFilteredItems.append(obj);
     }
+    renderStationPage();
 }
 
 void MainWindow::addStationRow(const QJsonObject &obj)
@@ -1547,7 +1575,8 @@ void MainWindow::onDeleteStationClicked(const QJsonObject &station)
 
 void MainWindow::reloadOperationLogList()
 {
-    ui->tableLog->setRowCount(0);
+    m_logPager.page = 0;
+    m_logItems = QJsonArray();
 
     QJsonObject params;
     params[QStringLiteral("limit")] = 200;
@@ -1565,13 +1594,12 @@ void MainWindow::reloadOperationLogList()
                                    .value(QStringLiteral("message")).toString(
                                        QStringLiteral("获取操作日志失败"));
         QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        renderLogPage();
         return;
     }
 
-    const QJsonArray items = resp.value(QStringLiteral("data")).toObject().value(QStringLiteral("items")).toArray();
-    for (const QJsonValue &value : items) {
-        addOperationLogRow(value.toObject());
-    }
+    m_logItems = resp.value(QStringLiteral("data")).toObject().value(QStringLiteral("items")).toArray();
+    renderLogPage();
 }
 
 void MainWindow::addOperationLogRow(const QJsonObject &obj)
@@ -1595,21 +1623,21 @@ void MainWindow::addOperationLogRow(const QJsonObject &obj)
 
 void MainWindow::reloadAnnouncementList()
 {
-    ui->tableAnnouncement->setRowCount(0);
+    m_announcePager.page = 0;
+    m_announceItems = QJsonArray();
     const QJsonObject resp = m_api->call(QStringLiteral("announcement.admin.list"));
     if (!resp.value(QStringLiteral("ok")).toBool()) {
         const QString errMsg = resp.value(QStringLiteral("error")).toObject()
                                    .value(QStringLiteral("message")).toString(
                                        QStringLiteral("获取公告列表失败"));
         QMessageBox::warning(this, QStringLiteral("错误"), errMsg);
+        renderAnnouncementPage();
         return;
     }
 
-    const QJsonArray items = resp.value(QStringLiteral("data")).toObject()
-                                 .value(QStringLiteral("items")).toArray();
-    for (const QJsonValue &value : items) {
-        addAnnouncementRow(value.toObject());
-    }
+    m_announceItems = resp.value(QStringLiteral("data")).toObject()
+                          .value(QStringLiteral("items")).toArray();
+    renderAnnouncementPage();
 }
 
 void MainWindow::addAnnouncementRow(const QJsonObject &obj)
@@ -1705,5 +1733,183 @@ void MainWindow::onDeleteAnnouncementClicked(const QJsonObject &announcement)
         return;
     }
     reloadAnnouncementList();
+}
+
+void MainWindow::setupPagination()
+{
+    m_userPager.attach(ui->page_3, ui->verticalLayout_6, ui->tableUser);
+    connect(m_userPager.prev, &QPushButton::clicked, this, [this]() {
+        if (m_userPager.page > 0) {
+            --m_userPager.page;
+            renderUserPage();
+        }
+    });
+    connect(m_userPager.next, &QPushButton::clicked, this, [this]() {
+        const int maxPage = m_userPager.total > 0 ? (m_userPager.total - 1) / ListPager::kPageSize : 0;
+        if (m_userPager.page < maxPage) {
+            ++m_userPager.page;
+            renderUserPage();
+        }
+    });
+
+    auto *pileLay = qobject_cast<QVBoxLayout *>(ui->widget_5->layout());
+    m_pilePager.attach(ui->page_1, pileLay, ui->tableWidgetPile);
+    connect(m_pilePager.prev, &QPushButton::clicked, this, [this]() {
+        if (m_pilePager.page > 0) {
+            --m_pilePager.page;
+            renderPilePage();
+        }
+    });
+    connect(m_pilePager.next, &QPushButton::clicked, this, [this]() {
+        const int maxPage = m_pilePager.total > 0 ? (m_pilePager.total - 1) / ListPager::kPageSize : 0;
+        if (m_pilePager.page < maxPage) {
+            ++m_pilePager.page;
+            renderPilePage();
+        }
+    });
+
+    m_orderPager.attach(ui->page_6, ui->verticalLayout_order, ui->tableOrder);
+    connect(m_orderPager.prev, &QPushButton::clicked, this, [this]() {
+        if (m_orderPager.page > 0) {
+            --m_orderPager.page;
+            renderOrderPage();
+        }
+    });
+    connect(m_orderPager.next, &QPushButton::clicked, this, [this]() {
+        const int maxPage = m_orderPager.total > 0 ? (m_orderPager.total - 1) / ListPager::kPageSize : 0;
+        if (m_orderPager.page < maxPage) {
+            ++m_orderPager.page;
+            renderOrderPage();
+        }
+    });
+
+    m_stationPager.attach(ui->page_2, ui->verticalLayout_station, ui->tableStation);
+    connect(m_stationPager.prev, &QPushButton::clicked, this, [this]() {
+        if (m_stationPager.page > 0) {
+            --m_stationPager.page;
+            renderStationPage();
+        }
+    });
+    connect(m_stationPager.next, &QPushButton::clicked, this, [this]() {
+        const int maxPage = m_stationPager.total > 0 ? (m_stationPager.total - 1) / ListPager::kPageSize : 0;
+        if (m_stationPager.page < maxPage) {
+            ++m_stationPager.page;
+            renderStationPage();
+        }
+    });
+
+    m_logPager.attach(ui->page_4, ui->verticalLayout_log, ui->tableLog);
+    connect(m_logPager.prev, &QPushButton::clicked, this, [this]() {
+        if (m_logPager.page > 0) {
+            --m_logPager.page;
+            renderLogPage();
+        }
+    });
+    connect(m_logPager.next, &QPushButton::clicked, this, [this]() {
+        const int maxPage = m_logPager.total > 0 ? (m_logPager.total - 1) / ListPager::kPageSize : 0;
+        if (m_logPager.page < maxPage) {
+            ++m_logPager.page;
+            renderLogPage();
+        }
+    });
+
+    m_announcePager.attach(ui->page_7, ui->verticalLayout_announcement, ui->tableAnnouncement);
+    connect(m_announcePager.prev, &QPushButton::clicked, this, [this]() {
+        if (m_announcePager.page > 0) {
+            --m_announcePager.page;
+            renderAnnouncementPage();
+        }
+    });
+    connect(m_announcePager.next, &QPushButton::clicked, this, [this]() {
+        const int maxPage = m_announcePager.total > 0 ? (m_announcePager.total - 1) / ListPager::kPageSize : 0;
+        if (m_announcePager.page < maxPage) {
+            ++m_announcePager.page;
+            renderAnnouncementPage();
+        }
+    });
+}
+
+void MainWindow::renderUserPage()
+{
+    ui->tableUser->setRowCount(0);
+    m_userPager.setTotal(m_userItems.size());
+    for (int i = m_userPager.startIndex(); i < m_userPager.endIndex(); ++i) {
+        addUserRow(m_userItems.at(i).toObject());
+    }
+}
+
+void MainWindow::renderPilePage()
+{
+    ui->tableWidgetPile->setRowCount(0);
+    m_pilePager.setTotal(m_pileItems.size());
+    for (int i = m_pilePager.startIndex(); i < m_pilePager.endIndex(); ++i) {
+        addPileRow(m_pileItems.at(i).toObject());
+    }
+}
+
+void MainWindow::renderOrderPage()
+{
+    ui->tableOrder->setRowCount(0);
+    m_orderPager.setTotal(m_orderItems.size());
+    for (int i = m_orderPager.startIndex(); i < m_orderPager.endIndex(); ++i) {
+        addOrderRow(m_orderItems.at(i).toObject());
+    }
+}
+
+void MainWindow::renderStationPage()
+{
+    ui->tableStation->setRowCount(0);
+    m_stationPager.setTotal(m_stationFilteredItems.size());
+    for (int i = m_stationPager.startIndex(); i < m_stationPager.endIndex(); ++i) {
+        addStationRow(m_stationFilteredItems.at(i).toObject());
+    }
+}
+
+void MainWindow::renderLogPage()
+{
+    ui->tableLog->setRowCount(0);
+    m_logPager.setTotal(m_logItems.size());
+    for (int i = m_logPager.startIndex(); i < m_logPager.endIndex(); ++i) {
+        addOperationLogRow(m_logItems.at(i).toObject());
+    }
+}
+
+void MainWindow::renderAnnouncementPage()
+{
+    ui->tableAnnouncement->setRowCount(0);
+    m_announcePager.setTotal(m_announceItems.size());
+    for (int i = m_announcePager.startIndex(); i < m_announcePager.endIndex(); ++i) {
+        addAnnouncementRow(m_announceItems.at(i).toObject());
+    }
+}
+
+void MainWindow::updatePileStatusOverview(const QJsonObject &pileStat, int pileTotal, double healthRate)
+{
+    if (!m_labPileStatusDetail || !m_labPileHealth) {
+        return;
+    }
+    if (pileTotal <= 0) {
+        m_labPileStatusDetail->setText(QStringLiteral("暂无电桩数据"));
+        m_labPileHealth->setText(QStringLiteral("健康度：--"));
+        return;
+    }
+
+    const QStringList statuses = {
+        QStringLiteral("闲置"), QStringLiteral("预约"),
+        QStringLiteral("在用"), QStringLiteral("故障"),
+    };
+    QStringList parts;
+    for (const QString &status : statuses) {
+        const int count = pileStat.value(status).toInt(0);
+        const double pct = count * 100.0 / pileTotal;
+        parts << QStringLiteral("%1 %2 个（%3%）")
+                     .arg(status)
+                     .arg(count)
+                     .arg(pct, 0, 'f', 1);
+    }
+    m_labPileStatusDetail->setText(parts.join(QStringLiteral("  |  ")));
+    m_labPileHealth->setText(
+        QStringLiteral("健康度（非故障占比）：%1%")
+            .arg(healthRate * 100.0, 0, 'f', 1));
 }
 

@@ -38,6 +38,23 @@ namespace {
 // 条目内文本的留白/行距（像素）
 constexpr int kItemTextLeft   = 14;
 constexpr int kItemTextRight  = 14;
+
+QString formatDurationSeconds(qint64 seconds)
+{
+    if (seconds <= 0) {
+        return QStringLiteral("--");
+    }
+    const int h = static_cast<int>(seconds / 3600);
+    const int m = static_cast<int>((seconds % 3600) / 60);
+    const int s = static_cast<int>(seconds % 60);
+    if (h > 0) {
+        return QStringLiteral("%1时%2分%3秒").arg(h).arg(m).arg(s);
+    }
+    if (m > 0) {
+        return QStringLiteral("%1分%2秒").arg(m).arg(s);
+    }
+    return QStringLiteral("%1秒").arg(s);
+}
 constexpr int kItemTextTop    = 10;
 constexpr int kItemTextBottom = 12;   // 文本底到行底的留白（兼作与下一条的分隔感）
 constexpr int kScrollbarAllow = 10;   // 预留滚动条宽度，避免测量与绘制宽度不一致裁字
@@ -1247,6 +1264,35 @@ QJsonObject MainWindow::fetchOrderByNo(const QString &orderNo)
     return {};
 }
 
+bool MainWindow::cancelReservation(const QString &orderNo)
+{
+    if (orderNo.isEmpty()) {
+        return false;
+    }
+    const auto ret = QMessageBox::question(
+        this,
+        QStringLiteral("取消预约"),
+        QStringLiteral("确定取消预约订单 %1 吗？取消后电桩将恢复为闲置。").arg(orderNo),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (ret != QMessageBox::Yes) {
+        return false;
+    }
+
+    QJsonObject data;
+    data[QStringLiteral("order_no")] = orderNo;
+    const QJsonObject resp = m_api->call(QStringLiteral("charge.cancel"), data);
+    if (!resp.value(QStringLiteral("ok")).toBool()) {
+        const QJsonObject err = resp.value(QStringLiteral("error")).toObject();
+        QMessageBox::warning(this, QStringLiteral("取消失败"),
+                             err.value(QStringLiteral("message")).toString(
+                                 QStringLiteral("取消预约失败，请稍后重试")));
+        return false;
+    }
+    QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("预约已取消。"));
+    return true;
+}
+
 bool MainWindow::checkOpenOrder(bool failClosed)
 {
     if (!refreshUserProfile() && failClosed) {
@@ -1302,18 +1348,24 @@ bool MainWindow::checkOpenOrder(bool failClosed)
 
     auto *actionBtn = new QPushButton(&dlg);
     auto *closeBtn = new QPushButton(QStringLiteral("关闭"), &dlg);
+    QPushButton *cancelBtn = nullptr;
     actionBtn->setStyleSheet(m_refreshButton->styleSheet());
     closeBtn->setStyleSheet(m_refreshButton->styleSheet());
 
     if (status == QStringLiteral("充电中"))
         actionBtn->setText(QStringLiteral("查看充电进度"));
-    else if (status == QStringLiteral("预约"))
+    else if (status == QStringLiteral("预约")) {
         actionBtn->setText(QStringLiteral("去开始充电"));
-    else
+        cancelBtn = new QPushButton(QStringLiteral("取消预约"), &dlg);
+        cancelBtn->setStyleSheet(m_refreshButton->styleSheet());
+    } else
         actionBtn->setText(QStringLiteral("去结算"));
 
     auto *btnRow = new QHBoxLayout;
     btnRow->addStretch();
+    if (cancelBtn) {
+        btnRow->addWidget(cancelBtn);
+    }
     btnRow->addWidget(closeBtn);
     btnRow->addWidget(actionBtn);
     lay->addWidget(label);
@@ -1323,8 +1375,24 @@ bool MainWindow::checkOpenOrder(bool failClosed)
     connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
 
     bool handled = false;
+    bool cancelled = false;
+    if (cancelBtn) {
+        connect(cancelBtn, &QPushButton::clicked, &dlg, [this, &dlg, orderNo, &cancelled]() {
+            dlg.hide();
+            if (cancelReservation(orderNo)) {
+                cancelled = true;
+                dlg.accept();
+            } else {
+                dlg.show();
+            }
+        });
+    }
     connect(actionBtn, &QPushButton::clicked, &dlg, [&]() { handled = true; dlg.accept(); });
     dlg.exec();
+
+    if (cancelled) {
+        return false;
+    }
 
     if (handled) {
         if (status == QStringLiteral("充电中")) {
@@ -1440,7 +1508,7 @@ void MainWindow::showChargingProgress(const QString &orderNo)
         kwhLabel->setText(QStringLiteral("已充电量：%1 kWh").arg(kwh, 0, 'f', 2));
         timeLabel->setText(QStringLiteral("已用时长：%1时%2分%3秒").arg(h).arg(m).arg(s));
         remainLabel->setText(remain > 0
-            ? QStringLiteral("预估剩余：%1秒").arg(remain)
+            ? QStringLiteral("预估剩余：%1").arg(formatDurationSeconds(remain))
             : QStringLiteral("预估剩余：--"));
         amountLabel->setText(QStringLiteral("累计费用：%1 元").arg(amount, 0, 'f', 2));
         statusLabel->setText(QStringLiteral("状态：%1（实时刷新中…）")

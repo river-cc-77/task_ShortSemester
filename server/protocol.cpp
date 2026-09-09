@@ -160,6 +160,9 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
     if (cmd == "charge.reserve") {
         return OrderHandler::reserve(id, token, data);
     }
+    if (cmd == "charge.cancel") {
+        return OrderHandler::cancel(id, token, data);
+    }
     if (cmd == "charge.start") {
         return OrderHandler::start(id, token, data);
     }

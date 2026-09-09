@@ -2,13 +2,18 @@
 #include "mainwindow.h"
 #include "apiclient.h"
 
+#include "../client/imsetup.h"
+
 #include <QApplication>
 #include <QFile>
 #include <QFont>
 
 int main(int argc, char *argv[])
 {
+    setupInputMethodEnv();
+
     QApplication app(argc, argv);
+    logInputMethodStatus();
 
     // 统一字体
     QFont baseFont(QStringLiteral("Microsoft YaHei UI"));

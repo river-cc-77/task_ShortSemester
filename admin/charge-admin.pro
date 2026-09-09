@@ -1,6 +1,7 @@
 QT += core gui widgets printsupport network
 CONFIG += c++17
 CONFIG -= app_bundle
+INCLUDEPATH += ../client
 TARGET = charge-admin
 RESOURCES += charge-admin.qrc
 SOURCES += \
