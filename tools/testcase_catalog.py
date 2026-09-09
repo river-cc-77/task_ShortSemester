@@ -103,10 +103,10 @@ MODULES = [
         "module": "管理端写操作与电桩管理",
         "feature": "建站、电桩 CRUD/重启、用户冻结解冻、代结算、pile.detail。",
         "purpose": "验证管理端写操作、事务一致性与 operation_log 写入。",
-        "precondition": "管理员已登录；存在故障桩 SZ002-03；8003 无未完成单。",
+        "precondition": "管理员已登录；存在至少 1 根故障或可置故障的电桩；8003 无未完成单。",
         "cases": [
             ("TC-43", "新建充电站", "station.create 随机站名", "返回 station_id，列表可见"),
-            ("TC-44", "远程重启故障桩", "pile.restart SZ002-03", "桩 status→闲置，写日志"),
+            ("TC-44", "远程重启故障桩", "pile.restart 故障桩 pile_no", "桩 status→闲置，写日志"),
             ("TC-45", "冻结用户 8003", "user.freeze user_id=3", "8003 登录失败"),
             ("TC-46", "解冻用户 8003", "user.freeze freeze=false", "8003 可再登录"),
             ("TC-47", "有待支付禁止冻结", "冻结 8002", "ok=false（有未完成单）"),

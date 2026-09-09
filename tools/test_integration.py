@@ -79,6 +79,42 @@ def find_idle_pile(host: str, port: int, admin_token: str, exclude: Optional[set
     return None
 
 
+def find_fault_pile(host: str, port: int, admin_token: str, exclude: Optional[set] = None) -> Optional[str]:
+    exclude = exclude or set()
+    resp = send_request(
+        host, port,
+        {"id": "find_fault", "cmd": "pile.list", "token": admin_token, "data": {"status": "故障"}},
+    )
+    if not resp.get("ok"):
+        return None
+    for row in resp["data"]["items"]:
+        no = row["pile_no"]
+        if row.get("status") == "故障" and no not in exclude:
+            return no
+    return None
+
+
+def ensure_fault_pile(host: str, port: int, admin_token: str, exclude: Optional[set] = None) -> str:
+    """返回可用于 pile.restart 的故障桩（重复跑测时 seed 故障桩可能已被重启）。"""
+    pile_no = find_fault_pile(host, port, admin_token, exclude=exclude)
+    if pile_no:
+        return pile_no
+    pile_no = find_idle_pile(host, port, admin_token, exclude=exclude)
+    if not pile_no:
+        raise RuntimeError("no pile available to mark fault for restart test")
+    ok(
+        host, port,
+        {
+            "id": "prep_fault",
+            "cmd": "pile.update",
+            "token": admin_token,
+            "data": {"pile_no": pile_no, "status": "故障"},
+        },
+        f"prepare fault pile {pile_no}",
+    )
+    return pile_no
+
+
 def cleanup_user_order(host: str, port: int, token: str, admin_token: str) -> None:
     resp = send_request(host, port, {"id": "c0", "cmd": "order.check_open", "token": token, "data": {}})
     if not resp.get("ok") or not resp["data"].get("has_open"):
@@ -267,7 +303,7 @@ def run_all(host: str, port: int) -> None:
     if "station_id" not in ok(host, port, {"id": "TC-43", "cmd": "station.create", "token": admin_token, "data": {"name": sname, "address": "测试路1号", "lat": 22.5, "lng": 114.0, "price": 1.2, "fast_count": 1, "slow_count": 1}}, "TC-43 create")["data"]:
         raise RuntimeError("TC-43 no station_id")
 
-    ok(host, port, {"id": "TC-44", "cmd": "pile.restart", "token": admin_token, "data": {"pile_no": "SZ002-03"}}, "TC-44 restart")
+    ok(host, port, {"id": "TC-44", "cmd": "pile.restart", "token": admin_token, "data": {"pile_no": ensure_fault_pile(host, port, admin_token)}}, "TC-44 restart")
 
     ok(host, port, {"id": "TC-45", "cmd": "user.freeze", "token": admin_token, "data": {"user_id": 3, "freeze": True}}, "TC-45 freeze")
     if send_request(host, port, {"id": "TC-45b", "cmd": "user.login", "data": {"phone": "13800138003"}}).get("ok"):
