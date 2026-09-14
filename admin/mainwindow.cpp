@@ -2019,7 +2019,7 @@ void MainWindow::setupForecastPage()
     m_comboForecastHorizon->addItem(QStringLiteral("未来 6 小时"), QStringLiteral("6h"));
     m_comboForecastHorizon->addItem(QStringLiteral("未来 24 小时"), QStringLiteral("24h"));
     auto *btnRefresh = new QPushButton(QStringLiteral("刷新预测"), m_pageForecast);
-    markBtn(btnRefresh, QStringLiteral("primary"));
+    styleActionBtn(btnRefresh, "primary");
     toolbar->addWidget(title);
     toolbar->addStretch();
     toolbar->addWidget(new QLabel(QStringLiteral("预测窗口："), m_pageForecast));
@@ -2043,7 +2043,7 @@ void MainWindow::setupForecastPage()
 
     connect(m_btnForecast, &QPushButton::clicked, this, [=]() {
         resetAllBtnSelect();
-        m_btnForecast->setProperty(QStringLiteral("selected"), true);
+        m_btnForecast->setProperty("selected", true);
         refreshBtnStyle(m_btnForecast);
         ui->stackedWidget->setCurrentIndex(forecastPageIndex);
         reloadForecastList();
@@ -2193,7 +2193,7 @@ void MainWindow::setupDashboardPage()
 
     connect(m_btnDashboard, &QPushButton::clicked, this, [=]() {
         resetAllBtnSelect();
-        m_btnDashboard->setProperty(QStringLiteral("selected"), true);
+        m_btnDashboard->setProperty("selected", true);
         refreshBtnStyle(m_btnDashboard);
         ui->stackedWidget->setCurrentIndex(dashboardPageIndex);
         reloadDashboardView();

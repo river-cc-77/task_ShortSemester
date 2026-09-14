@@ -24,7 +24,10 @@ cd task_ShortSemester
 
 ```bash
 sudo apt update
-sudo apt install -y qt6-base-dev qt6-charts-dev libqt6sql6-sqlite g++ make python3
+sudo apt install -y qt6-base-dev libqt6sql6-sqlite g++ make python3 python3-pip sqlite3
+# 管理端内嵌 dashboard 可选:
+# sudo apt install -y qt6-webengine-dev libqt6webenginecore6 libqt6webenginewidgets6
+# 注: Ubuntu 22.04 无 qt6-charts-dev 包名；本项目 admin 用 QCustomPlot，不需要 charts
 ```
 
 ### 3. 创建数据库
