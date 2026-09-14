@@ -299,13 +299,6 @@ const gaugeOpt = computed(() => {
   }
 })
 
-const evalLoad = computed(() => data.value?.ml_evaluation?.load_kwh || {})
-const evalDuration = computed(() => data.value?.ml_evaluation?.duration_min || {})
-
-function fmtMetric(v) {
-  return v == null ? '—' : round2(v).toFixed(2)
-}
-
 async function refresh() {
   try {
     data.value = await fetchAll()
@@ -327,111 +320,77 @@ onUnmounted(() => clearInterval(timer))
 <template>
   <div class="dashboard">
     <header class="header">
-      <div>
-        <dv-decoration-5 :dur="3" style="width: 420px; height: 36px" />
-        <h1>东软电动汽车充电桩 — 机器学习智能分析大屏</h1>
-        <div class="sub">Vue3 · DataV · Flask API · PySpark 多维分析 · WMA 负荷预测</div>
-      </div>
+      <h1>东软电动汽车充电桩 — 智能分析大屏</h1>
       <div class="time">{{ error || `刷新：${updatedAt}` }}</div>
     </header>
 
     <section class="kpi-row">
-      <dv-border-box-8 v-for="([label, value], i) in kpiCards" :key="i" class="kpi-box">
+      <div v-for="([label, value], i) in kpiCards" :key="i" class="kpi-card">
         <div class="kpi-label">{{ label }}</div>
         <div class="kpi-value">{{ value }}</div>
-      </dv-border-box-8>
+      </div>
     </section>
 
     <section class="grid">
-      <dv-border-box-1 class="panel">
-        <div class="panel-title">近 30 日营收趋势（折线/面积）</div>
+      <div class="panel panel-box">
+        <div class="panel-title">近 30 日营收趋势</div>
         <VChart class="chart" :option="revenueOpt" autoresize />
-      </dv-border-box-1>
+      </div>
 
-      <dv-border-box-1 class="panel">
-        <div class="panel-title">电桩状态（饼图）</div>
+      <div class="panel panel-box">
+        <div class="panel-title">电桩状态</div>
         <VChart class="chart" :option="pileOpt" autoresize />
-      </dv-border-box-1>
+      </div>
 
-      <dv-border-box-1 class="panel">
-        <div class="panel-title">平台利用率（仪表盘）</div>
+      <div class="panel panel-box">
+        <div class="panel-title">平台利用率</div>
         <VChart class="chart" :option="gaugeOpt" autoresize />
-      </dv-border-box-1>
+      </div>
 
-      <dv-border-box-12 class="panel wide">
-        <div class="panel-title">充电高峰曲线（柱+折线双轴）</div>
+      <div class="panel panel-box wide">
+        <div class="panel-title">充电高峰曲线</div>
         <VChart class="chart" :option="hourlyOpt" autoresize />
-      </dv-border-box-12>
+      </div>
 
-      <dv-border-box-1 class="panel">
-        <div class="panel-title">区域营收分布（环形饼图）</div>
+      <div class="panel panel-box">
+        <div class="panel-title">区域营收分布</div>
         <VChart class="chart" :option="regionOpt" autoresize />
-      </dv-border-box-1>
+      </div>
 
-      <dv-border-box-1 class="panel">
-        <div class="panel-title">电站排行（横向柱状）</div>
+      <div class="panel panel-box">
+        <div class="panel-title">电站排行</div>
         <VChart class="chart" :option="rankOpt" autoresize />
-      </dv-border-box-1>
+      </div>
 
-      <dv-border-box-1 class="panel">
-        <div class="panel-title">24h 历史分布（柱状）</div>
+      <div class="panel panel-box">
+        <div class="panel-title">24 小时历史分布</div>
         <VChart class="chart" :option="historyOpt" autoresize />
-      </dv-border-box-1>
+      </div>
 
-      <dv-border-box-13 class="panel wide">
-        <div class="panel-title">交叉对比 1：工作日 vs 周末</div>
+      <div class="panel panel-box wide">
+        <div class="panel-title">工作日 vs 周末</div>
         <VChart class="chart" :option="weekdayOpt" autoresize />
-      </dv-border-box-13>
+      </div>
 
-      <dv-border-box-13 class="panel full">
-        <div class="panel-title">交叉对比 2：各站 24 小时充电量（折线）</div>
+      <div class="panel panel-box full">
+        <div class="panel-title">各站 24 小时充电量</div>
         <VChart class="chart tall" :option="stationHourOpt" autoresize />
-      </dv-border-box-13>
+      </div>
 
-      <dv-border-box-1 class="panel">
-        <div class="panel-title">电站运营雷达图</div>
+      <div class="panel panel-box">
+        <div class="panel-title">电站运营指标</div>
         <VChart class="chart" :option="radarOpt" autoresize />
-      </dv-border-box-1>
+      </div>
 
-      <dv-border-box-12 class="panel wide">
-        <div class="panel-title">各站负荷预测 1h/6h/24h</div>
+      <div class="panel panel-box wide">
+        <div class="panel-title">各站负荷预测</div>
         <VChart class="chart" :option="loadOpt" autoresize />
-      </dv-border-box-12>
+      </div>
 
-      <dv-border-box-12 class="panel wide">
-        <div class="panel-title">充电时长与高峰（柱+散点）</div>
+      <div class="panel panel-box wide">
+        <div class="panel-title">充电时长与高峰</div>
         <VChart class="chart" :option="timeOpt" autoresize />
-      </dv-border-box-12>
-
-      <dv-border-box-8 class="panel full">
-        <div class="panel-title">WMA 模型离线评估（MAE / RMSE / MAPE）</div>
-        <div class="eval-row">
-          <div class="eval-item">
-            <div class="label">负荷 MAE (kWh)</div>
-            <div class="value">{{ fmtMetric(evalLoad.mae) }}</div>
-          </div>
-          <div class="eval-item">
-            <div class="label">负荷 RMSE</div>
-            <div class="value">{{ fmtMetric(evalLoad.rmse) }}</div>
-          </div>
-          <div class="eval-item">
-            <div class="label">负荷 MAPE (%)</div>
-            <div class="value">{{ fmtMetric(evalLoad.mape_pct) }}</div>
-          </div>
-          <div class="eval-item">
-            <div class="label">时长 MAE (min)</div>
-            <div class="value">{{ fmtMetric(evalDuration.mae) }}</div>
-          </div>
-          <div class="eval-item">
-            <div class="label">时长 RMSE</div>
-            <div class="value">{{ fmtMetric(evalDuration.rmse) }}</div>
-          </div>
-          <div class="eval-item">
-            <div class="label">时长 MAPE (%)</div>
-            <div class="value">{{ fmtMetric(evalDuration.mape_pct) }}</div>
-          </div>
-        </div>
-      </dv-border-box-8>
+      </div>
     </section>
   </div>
 </template>
