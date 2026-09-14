@@ -36,6 +36,9 @@ public:
 
     // 负荷预测查询（forecast.list，协议 5.3，用户端/管理端通用）
     static QJsonObject forecastList(const QString &id, const QString &token, const QJsonObject &data);
+
+    // 充电时间预测查询（timeforecast.list，协议 5.3，用户端/管理端通用）
+    static QJsonObject timeForecastList(const QString &id, const QString &token, const QJsonObject &data);
 };
 
 #endif // STATIONHANDLER_H

@@ -404,3 +404,27 @@ QJsonObject StationHandler::forecastList(const QString &id, const QString &token
     responseData["items"] = DbManager::instance().fetchForecasts(horizon, stationId);
     return Protocol::makeSuccess(id, responseData);
 }
+
+// ============================================================
+// timeforecast.list — 充电时间预测查询（协议 5.3 P2）
+// 用户端/管理端通用：data { horizon: 1h|6h|24h, station_id?: 可选 }
+// 数据由 ML 预测任务写入 time_forecast 表
+// ============================================================
+QJsonObject StationHandler::timeForecastList(const QString &id, const QString &token, const QJsonObject &data)
+{
+    SessionInfo session;
+    const QJsonObject auth = authUserOrAdmin(id, token, session);
+    if (!auth.isEmpty()) return auth;
+
+    const QString horizon = data.value("horizon").toString().trimmed();
+    if (horizon != QStringLiteral("1h") && horizon != QStringLiteral("6h")
+            && horizon != QStringLiteral("24h")) {
+        return Protocol::makeError(id, "INVALID_PARAM", "horizon 只能为 1h / 6h / 24h");
+    }
+    const int stationId = data.value("station_id").toInt(0);
+
+    QJsonObject responseData;
+    responseData["horizon"] = horizon;
+    responseData["items"] = DbManager::instance().fetchTimeForecasts(horizon, stationId);
+    return Protocol::makeSuccess(id, responseData);
+}

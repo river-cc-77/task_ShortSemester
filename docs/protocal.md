@@ -141,6 +141,7 @@
 | `user.freeze` | 管理端 | P1 | 冻结/解冻 |
 | `order.admin.settle` | 管理端 | P1 | 代结算 |
 | `forecast.list` | 用户端/管理端 | P2 | 负荷预测 |
+| `timeforecast.list` | 用户端/管理端 | P2 | 充电时间预测 |
 | `event.push` | 服务端→客户端 | P2 | 服务端主动推送 |
 
 > **P0** = 第 1 周必须实现；**P1** = 第 2–3 周；**P2** = 加分项
@@ -808,7 +809,7 @@ estimated_remain_seconds = ceil(max(0, 50 - kwh) × 3600 / power_kw)   // 演示
 
 ### 5.3 `forecast.list`
 
-**请求 data：** `{ "horizon": "1h" }`
+**请求 data：** `{ "horizon": "1h", "station_id": 1 }`（`station_id` 可选）
 
 **响应 items[]：**
 
@@ -819,6 +820,22 @@ estimated_remain_seconds = ceil(max(0, 50 - kwh) × 3600 / power_kw)   // 演示
   "forecast_hour": "2026-08-28 15:00",
   "predicted_load": 85.0,
   "predicted_idle_piles": 4
+}
+```
+
+### 5.3.1 `timeforecast.list`
+
+**请求 data：** `{ "horizon": "1h", "station_id": 1 }`（`station_id` 可选）
+
+**响应 items[]：**
+
+```json
+{
+  "station_id": 1,
+  "station_name": "深圳市民中心充电站",
+  "forecast_hour": "2026-08-28 15:00",
+  "predicted_avg_duration_min": 42.0,
+  "predicted_peak_hour": 11
 }
 ```
 

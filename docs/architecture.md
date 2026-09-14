@@ -254,9 +254,10 @@ erDiagram
 
 ### 7.5 机器学习 `ml/`
 
-- 从 `charge_order`、 `pile` 等表提取特征
-- 预测未来 1h / 6h / 24h 负荷，结果写入 `load_forecast`
-- 为用户端推荐与管理端预警提供数据
+- `collector` 产出 `ads_station_hourly` 等特征表；`export_to_hdfs.py` 入湖，Hive + Spark SQL 预测
+- 本地开发可用 `predict_local.py`（与 Spark SQL 同算法）写回 SQLite
+- 负荷预测 → `load_forecast`（`forecast.list`）；充电时间预测 → `time_forecast`（`timeforecast.list`）
+- 可选 `generate_orders.py` 批量造历史订单，供演示与验收
 
 ### 7.6 数据采集 `collector/`
 
@@ -287,13 +288,24 @@ cd db
 sqlite3 charge.db < schema.sql
 sqlite3 charge.db < seed.sql
 
-# 2. 启动业务服务（必须先起）
-cd ../server
+# 2. 编译并运行 collector（大屏 / ML 特征，Linux）
+cd ../collector
+qmake6 collector.pro && make -j4
+./ads-collector          # 启动即回填近 30 天 ads_*，之后每 60s 刷新
+
+# 3. ML 预测（可选，造数 + 预测见 ml/README.md）
+cd ..
+python3 ml/generate_orders.py 3000   # 演示用：批量历史订单
+cd collector && ./ads-collector      # 重算 ads_*
+cd .. && bash ml/run_pipeline.sh     # 导出 HDFS 镜像 + 写 load/time_forecast
+
+# 4. 启动业务服务（必须先于 client/admin）
+cd server
 qmake6 charge-server.pro && make -j4
 ./charge-server
 
-# 3. 启动用户端 / 管理端（连接 127.0.0.1:9000）
-# 4. 可选：dashboard、ml 定时任务
+# 5. 启动用户端 / 管理端（连接 127.0.0.1:9000）
+# 6. 可选：dashboard
 ```
 
 ### 8.3 演示账号

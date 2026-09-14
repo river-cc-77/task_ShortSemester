@@ -516,6 +516,13 @@ bool DbManager::deleteStation(int stationId)
             return false;
         }
 
+        QSqlQuery timeForecast(m_db);
+        timeForecast.prepare("DELETE FROM time_forecast WHERE station_id = :sid");
+        timeForecast.bindValue(":sid", stationId);
+        if (!timeForecast.exec()) {
+            return false;
+        }
+
         QSqlQuery station(m_db);
         station.prepare("DELETE FROM station WHERE id = :sid");
         station.bindValue(":sid", stationId);
@@ -1639,6 +1646,44 @@ QJsonArray DbManager::fetchForecasts(const QString &horizon, int stationId)
         row["forecast_hour"] = query.value("forecast_hour").toString();
         row["predicted_load"] = query.value("predicted_load").toDouble();
         row["predicted_idle_piles"] = query.value("predicted_idle_piles").toInt();
+        items.append(row);
+    }
+    return items;
+}
+
+QJsonArray DbManager::fetchTimeForecasts(const QString &horizon, int stationId)
+{
+    QSqlQuery query(m_db);
+    QString sql =
+        "SELECT f.station_id, s.name AS station_name, f.forecast_hour, "
+        "f.predicted_avg_duration_min, f.predicted_peak_hour, f.created_at "
+        "FROM time_forecast f JOIN station s ON f.station_id = s.id "
+        "WHERE f.horizon = :h ";
+    if (stationId > 0) {
+        sql += "AND f.station_id = :sid ";
+    }
+    sql += "ORDER BY f.station_id, f.forecast_hour";
+
+    query.prepare(sql);
+    query.bindValue(":h", horizon);
+    if (stationId > 0) {
+        query.bindValue(":sid", stationId);
+    }
+
+    QJsonArray items;
+    if (!query.exec()) {
+        qWarning() << "fetchTimeForecasts failed:" << query.lastError().text();
+        return items;
+    }
+    while (query.next()) {
+        QJsonObject row;
+        row["station_id"] = query.value("station_id").toInt();
+        row["station_name"] = query.value("station_name").toString();
+        row["forecast_hour"] = query.value("forecast_hour").toString();
+        row["predicted_avg_duration_min"] = query.value("predicted_avg_duration_min").toDouble();
+        if (!query.value("predicted_peak_hour").isNull()) {
+            row["predicted_peak_hour"] = query.value("predicted_peak_hour").toInt();
+        }
         items.append(row);
     }
     return items;

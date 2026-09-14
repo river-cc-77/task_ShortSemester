@@ -211,6 +211,10 @@ QJsonObject Protocol::handleRequest(const QJsonObject &request)
         // 协议 5.3 P2：负荷预测查询（用户端/管理端）
         return StationHandler::forecastList(id, token, data);
     }
+    if (cmd == "timeforecast.list") {
+        // 协议 5.3 P2：充电时间预测查询（用户端/管理端）
+        return StationHandler::timeForecastList(id, token, data);
+    }
 
     // ===== 公告 =====
     if (cmd == "announcement.list") {

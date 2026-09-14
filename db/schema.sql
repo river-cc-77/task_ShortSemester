@@ -160,6 +160,22 @@ CREATE TABLE IF NOT EXISTS load_forecast (
 CREATE INDEX IF NOT EXISTS idx_forecast_station ON load_forecast (station_id, horizon);
 
 -- ---------------------------------------------------------------------------
+-- 充电时间预测结果（ML 脚本写入，用户端/管理端读取）
+-- horizon: 1h | 6h | 24h
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS time_forecast (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_id                  INTEGER NOT NULL REFERENCES station (id) ON DELETE CASCADE,
+    forecast_hour               TEXT    NOT NULL,  -- 预测目标时段，如 2026-08-28 15:00
+    predicted_avg_duration_min  REAL    NOT NULL DEFAULT 0,  -- 预测平均充电时长（分）
+    predicted_peak_hour         INTEGER,                     -- 预测高峰小时 0-23；无历史为 NULL
+    horizon                     TEXT    NOT NULL CHECK (horizon IN ('1h', '6h', '24h')),
+    created_at                  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_time_forecast_station ON time_forecast (station_id, horizon);
+
+-- ---------------------------------------------------------------------------
 -- 平台级 日KPI 快照（collector/ 定时任务写入，避免大屏频繁扫订单表）
 -- stat_date 为业务时间（localtime）的自然日
 -- ---------------------------------------------------------------------------

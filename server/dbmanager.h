@@ -88,6 +88,7 @@ public:
 
     // ===== 负荷预测 =====
     QJsonArray fetchForecasts(const QString &horizon, int stationId);
+    QJsonArray fetchTimeForecasts(const QString &horizon, int stationId);
 
     // ===== 收藏 =====
     bool addFavorite(int userId, int stationId);

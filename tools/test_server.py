@@ -843,6 +843,24 @@ def main() -> int:
         "forecast.list invalid horizon", expect_ok=False,
     )
 
+    # id=55~57 timeforecast.list — 充电时间预测（读 time_forecast 表）
+    run_test(
+        host, port,
+        {"id": "55", "cmd": "timeforecast.list", "token": token, "data": {"horizon": "1h"}},
+        "timeforecast.list (user)",
+    )
+    run_test(
+        host, port,
+        {"id": "56", "cmd": "timeforecast.list", "token": admin_token,
+         "data": {"horizon": "24h", "station_id": station_id}},
+        "timeforecast.list (admin)",
+    )
+    run_test(
+        host, port,
+        {"id": "57", "cmd": "timeforecast.list", "token": token, "data": {"horizon": "2h"}},
+        "timeforecast.list invalid horizon", expect_ok=False,
+    )
+
     # ===== §10 通用错误处理 =====
 
     # id=33 充值金额为负 → 参数错误
