@@ -673,6 +673,8 @@ def main() -> int:
         "user.login 8004 (low balance)",
     )
     token8004 = user8004["data"]["token"]
+    # 上次若在 33q 中断，8004 会残留「待支付」单，需先清理再预约
+    cleanup_open_order(host, port, token8004, admin_token)
     low_balance_pile = "SZ002-01"
     low_reserve = run_test(
         host, port,
