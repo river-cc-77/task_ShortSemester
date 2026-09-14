@@ -2008,6 +2008,8 @@ void MainWindow::setupForecastPage()
 {
     m_pageForecast = new QWidget;
     auto *pageLay = new QVBoxLayout(m_pageForecast);
+    pageLay->setContentsMargins(20, 16, 20, 20);
+    pageLay->setSpacing(12);
     auto *toolbar = new QHBoxLayout;
     auto *title = new QLabel(QStringLiteral("充电负荷与时长智能预测（ML）"));
     title->setStyleSheet(QStringLiteral("font-size: 18px; font-weight: bold;"));
@@ -2029,7 +2031,10 @@ void MainWindow::setupForecastPage()
         QStringLiteral("预测空闲桩"), QStringLiteral("预测充电时长(分)"),
         QStringLiteral("高峰小时"), QStringLiteral("空闲率预警"), QStringLiteral("更新时间"),
     });
-    configureTable(m_tableForecast, {0}, {1, 2, 3, 4, 5, 6, 7});
+    m_tableForecast->verticalHeader()->setVisible(false);
+    configureTable(m_tableForecast, {0, 1}, {2, 3, 4, 5, 6, 7}, -1, 0);
+    m_tableForecast->verticalHeader()->setDefaultSectionSize(44);
+    m_tableForecast->setAlternatingRowColors(true);
     m_tableForecast->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_tableForecast->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
@@ -2103,11 +2108,8 @@ void MainWindow::openDashboardInBrowser()
                              QStringLiteral("无法打开浏览器，请手动访问：%1").arg(url.toString()));
         return;
     }
-    if (m_labDashboardHint) {
-        m_labDashboardHint->setText(
-            QStringLiteral("已在系统浏览器打开：%1").arg(url.toString()));
-    }
 }
+
 
 void MainWindow::reloadDashboardView()
 {
@@ -2115,17 +2117,9 @@ void MainWindow::reloadDashboardView()
 #ifdef CHARGE_USE_WEBENGINE
     if (m_webDashboard) {
         m_webDashboard->load(url);
-        if (m_labDashboardHint) {
-            m_labDashboardHint->setText(
-                QStringLiteral("内嵌加载：%1（需先运行 python dashboard/app.py）").arg(url.toString()));
-        }
         return;
     }
 #endif
-    if (m_labDashboardHint) {
-        m_labDashboardHint->setText(
-            QStringLiteral("未安装 Qt WebEngine，请使用「浏览器打开」。地址：%1").arg(url.toString()));
-    }
 }
 
 void MainWindow::setupDashboardPage()
@@ -2146,12 +2140,8 @@ void MainWindow::setupDashboardPage()
     auto *btnBrowser = new QPushButton(QStringLiteral("浏览器打开"), toolbar);
     styleActionBtn(btnRefresh, "primary");
     styleActionBtn(btnBrowser, "primary");
-    m_labDashboardHint = new QLabel(toolbar);
-    m_labDashboardHint->setStyleSheet(QStringLiteral("color: #5a6780;"));
-    m_labDashboardHint->setWordWrap(true);
     toolbarLay->addWidget(title);
     toolbarLay->addStretch();
-    toolbarLay->addWidget(m_labDashboardHint, 1);
     toolbarLay->addWidget(btnRefresh);
     toolbarLay->addWidget(btnBrowser);
     pageLay->addWidget(toolbar);
