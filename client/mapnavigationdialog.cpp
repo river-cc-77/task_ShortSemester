@@ -1,5 +1,4 @@
 #include "mapnavigationdialog.h"
-#include "uiutil.h"
 
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -8,6 +7,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -15,6 +15,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QResizeEvent>
+#include <QScrollArea>
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
 #include <QTextDocument>
@@ -265,28 +266,12 @@ bool ensureWebEngineProcessPath()
 
 } // namespace
 
-MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
-                                         double originLat, double originLng,
-                                         const QString &destName, double destLat, double destLng,
-                                         const QString &baiduAk,
-                                         const QString &destAddress,
-                                         QWidget *parent)
-    : QDialog(parent)
-    , m_originDesc(originDesc)
-    , m_originLat(originLat)
-    , m_originLng(originLng)
-    , m_destName(destName)
-    , m_destLat(destLat)
-    , m_destLng(destLng)
+MapNavigationDialog::MapNavigationDialog(const QString &baiduAk, QWidget *parent)
+    : QWidget(parent)
     , m_baiduAk(baiduAk)
-    , m_region(guessRegionFromAddress(destAddress))
 {
     setObjectName(QStringLiteral("navDialog"));
-    setWindowTitle(QStringLiteral("地图导航"));
     setAttribute(Qt::WA_StyledBackground, true);
-    // 无边框铺满客户端窗口：避免标题栏/边框使内容溢出父窗口
-    setWindowFlag(Qt::FramelessWindowHint, true);
-    setWindowModality(Qt::WindowModal);
 
     m_net = new QNetworkAccessManager(this);
     m_stack = new QStackedWidget(this);
@@ -300,15 +285,41 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     }
 #endif
 
-    // ---------- 页 1：起终点 + 出行方式 ----------
-    m_setupPage = new QWidget(this);
-    auto *setupLay = new QVBoxLayout(m_setupPage);
-    setupLay->setContentsMargins(14, 14, 14, 14);
-    setupLay->setSpacing(10);
+    // ---------- 常驻地图：下半区无论切到哪个面板，地图都保持显示（需求 3） ----------
+    m_mapStack = new QStackedWidget(this);
+    m_mapStack->setObjectName(QStringLiteral("navMapStack"));
+    m_mapStack->setMinimumHeight(180);   // 原 160；最小窗口 320×568 时仍是可用的地图区
 
-    auto *titleLabel = new QLabel(QStringLiteral("地图导航"), m_setupPage);
-    titleLabel->setObjectName(QStringLiteral("userGreet"));
-    setupLay->addWidget(titleLabel);
+    m_mapLabel = new QLabel(m_mapStack);
+    m_mapLabel->setObjectName(QStringLiteral("navMapPreview"));
+    m_mapLabel->setAlignment(Qt::AlignCenter);
+    m_mapLabel->setScaledContents(true);
+    m_mapStack->addWidget(m_mapLabel);
+
+#ifdef CHARGE_USE_WEBENGINE
+    if (m_webEngineReady) {
+        m_webView = new QWebEngineView(m_mapStack);
+        m_webView->setObjectName(QStringLiteral("navWebMap"));
+        m_webView->setFocusPolicy(Qt::StrongFocus);
+        auto *settings = m_webView->settings();
+        settings->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
+        settings->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
+        settings->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled, true);
+        m_mapStack->addWidget(m_webView);
+    }
+#endif
+
+    // ---------- 面板 1：线路设置（放进滚动区：内容约 340px，窄屏下不能被裁掉） ----------
+    m_setupScroll = new QScrollArea(this);
+    m_setupScroll->setObjectName(QStringLiteral("navSetupScroll"));
+    m_setupScroll->setWidgetResizable(true);
+    m_setupScroll->setFrameShape(QFrame::NoFrame);
+    m_setupScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    m_setupPage = new QWidget;
+    auto *setupLay = new QVBoxLayout(m_setupPage);
+    setupLay->setContentsMargins(4, 4, 4, 4);
+    setupLay->setSpacing(8);
 
     auto *routeCard = makeCard(m_setupPage);
     auto *routeLay = new QVBoxLayout(routeCard);
@@ -320,17 +331,10 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
 
     m_originLabel = new QLabel(routeCard);
     m_originLabel->setWordWrap(true);
-    m_originLabel->setText(QStringLiteral("起点：%1\n（%2, %3）")
-                               .arg(m_originDesc)
-                               .arg(m_originLat, 0, 'f', 6)
-                               .arg(m_originLng, 0, 'f', 6));
 
     m_destLabel = new QLabel(routeCard);
     m_destLabel->setWordWrap(true);
-    m_destLabel->setText(QStringLiteral("终点：%1\n（%2, %3）")
-                             .arg(m_destName)
-                             .arg(m_destLat, 0, 'f', 6)
-                             .arg(m_destLng, 0, 'f', 6));
+    updateRouteLabels();   // 起终点文案统一由 updateRouteLabels() 生成（未设置时显示提示语）
 
     routeLay->addWidget(routeTitle);
     routeLay->addWidget(m_originLabel);
@@ -358,7 +362,7 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     setupLay->addWidget(modeCard);
 
     m_statusLabel = new QLabel(
-        QStringLiteral("起终点已就绪，选择方式后点击「开始导航」。"),
+        QStringLiteral("请先在「电站选择」页选择充电站并点「导航」。"),
         m_setupPage);
     m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
     m_statusLabel->setWordWrap(true);
@@ -385,55 +389,29 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     m_startBtn->setCursor(Qt::PointingHandCursor);
     m_startBtn->setMinimumHeight(42);
 
-    auto *closeBtn = new QPushButton(QStringLiteral("返回"), m_setupPage);
-    closeBtn->setCursor(Qt::PointingHandCursor);
-    closeBtn->setMinimumHeight(36);
+    // 与「导航中」面板的「返回」（回到本面板）语义不同，这里是退出到电站列表
+    auto *backToStationsBtn = new QPushButton(QStringLiteral("返回电站列表"), m_setupPage);
+    backToStationsBtn->setCursor(Qt::PointingHandCursor);
+    backToStationsBtn->setMinimumHeight(36);
 
     setupLay->addWidget(m_startBtn);
-    setupLay->addWidget(closeBtn);
+    setupLay->addWidget(backToStationsBtn);
 
     connect(m_startBtn, &QPushButton::clicked, this, &MapNavigationDialog::onStartNavigation);
-    connect(closeBtn, &QPushButton::clicked, this, &QDialog::reject);
+    connect(backToStationsBtn, &QPushButton::clicked, this, &MapNavigationDialog::requestBack);
 
-    // ---------- 页 2：应用内路线（地图 + 分步指引） ----------
+    m_setupScroll->setWidget(m_setupPage);
+
+    // ---------- 面板 2：导航中（摘要 + 分步指引；地图在上方常驻） ----------
     m_navPage = new QWidget(this);
     auto *navLay = new QVBoxLayout(m_navPage);
-    navLay->setContentsMargins(14, 14, 14, 14);
+    navLay->setContentsMargins(4, 4, 4, 4);
     navLay->setSpacing(8);
-
-    auto *navTitle = new QLabel(QStringLiteral("导航中"), m_navPage);
-    navTitle->setObjectName(QStringLiteral("userGreet"));
-    navLay->addWidget(navTitle);
 
     m_summaryLabel = new QLabel(m_navPage);
     m_summaryLabel->setWordWrap(true);
     m_summaryLabel->setObjectName(QStringLiteral("sectionTitle"));
     navLay->addWidget(m_summaryLabel);
-
-    m_mapStack = new QStackedWidget(m_navPage);
-    m_mapStack->setObjectName(QStringLiteral("navMapStack"));
-    m_mapStack->setMinimumHeight(160);
-
-    m_mapLabel = new QLabel(m_mapStack);
-    m_mapLabel->setObjectName(QStringLiteral("navMapPreview"));
-    m_mapLabel->setAlignment(Qt::AlignCenter);
-    m_mapLabel->setScaledContents(true);
-    m_mapStack->addWidget(m_mapLabel);
-
-#ifdef CHARGE_USE_WEBENGINE
-    if (m_webEngineReady) {
-        m_webView = new QWebEngineView(m_mapStack);
-        m_webView->setObjectName(QStringLiteral("navWebMap"));
-        m_webView->setFocusPolicy(Qt::StrongFocus);
-        auto *settings = m_webView->settings();
-        settings->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
-        settings->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
-        settings->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled, true);
-        m_mapStack->addWidget(m_webView);
-    }
-#endif
-
-    navLay->addWidget(m_mapStack);
 
     auto *stepsTitle = new QLabel(QStringLiteral("路线指引"), m_navPage);
     stepsTitle->setObjectName(QStringLiteral("sectionTitle"));
@@ -442,6 +420,9 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     m_stepsList = new NavStepsListWidget(m_navPage);
     m_stepsList->setObjectName(QStringLiteral("navStepsList"));
     m_stepsList->setMinimumHeight(88);
+    // 原为 stretch=1（并抢走全部剩余高度，是地图被压到 160px 的直接原因）。
+    // 改为限高，把纵向空间让给地图（需求 3）。
+    m_stepsList->setMaximumHeight(220);
     navLay->addWidget(m_stepsList, 1);
 
     auto *backBtn = new QPushButton(QStringLiteral("返回"), m_navPage);
@@ -450,61 +431,18 @@ MapNavigationDialog::MapNavigationDialog(const QString &originDesc,
     navLay->addWidget(backBtn);
     connect(backBtn, &QPushButton::clicked, this, &MapNavigationDialog::onBackToSetup);
 
-    m_stack->addWidget(m_setupPage);
+    m_stack->addWidget(m_setupScroll);
     m_stack->addWidget(m_navPage);
 
+    // ---------- 组装：地图常驻在上，面板在下 ----------
     auto *rootLay = new QVBoxLayout(this);
     rootLay->setContentsMargins(0, 0, 0, 0);
-    rootLay->addWidget(m_stack);
+    rootLay->setSpacing(8);
+    rootLay->addWidget(m_mapStack, 3);   // 地图吃掉主要高度
+    rootLay->addWidget(m_stack, 2);
 
-    refitToParent(460);
-
-    // 跟随父窗口（客户端主窗）变化：父窗 resize/move 时本导航窗实时重新铺满对齐，
-    // 使导航窗口尺寸始终与用户端窗口保持同步（而非只取打开瞬间的尺寸）。
-    if (QWidget *win = parent) {
-        win->installEventFilter(this);
-    }
-}
-
-void MapNavigationDialog::refitToParent(int)
-{
-    QWidget *parentWin = parentWidget();
-    if (!parentWin) {
-        return;
-    }
-    // 全程铺满客户端窗口：尺寸固定为父窗口客户区、位置锁定在父窗口原点，杜绝任何溢出。
-    const QSize full = parentWin->size();
-    setMinimumSize(full);
-    setMaximumSize(full);
-    resize(full);
-    move(parentWin->mapToGlobal(QPoint(0, 0)));
-}
-
-MapNavigationDialog::~MapNavigationDialog()
-{
-    if (QWidget *win = parentWidget()) {
-        win->removeEventFilter(this);
-    }
-}
-
-// 父窗口（客户端主窗）尺寸/位置变化时，本导航窗重新铺满对齐，做到与用户端窗口同步。
-bool MapNavigationDialog::eventFilter(QObject *watched, QEvent *event)
-{
-    if (watched == parentWidget()) {
-        const QEvent::Type t = event->type();
-        if (t == QEvent::Resize || t == QEvent::Move) {
-            // 延迟到父窗口本次 resize/move 事件处理完毕后再重排，避免嵌套改动；
-            // 连续拖拽会产生大量 resize/move，用标志位合并为一次重排，防止抖动。
-            if (!m_refitQueued) {
-                m_refitQueued = true;
-                QTimer::singleShot(0, this, [this]() {
-                    m_refitQueued = false;
-                    refitToParent(0);
-                });
-            }
-        }
-    }
-    return QDialog::eventFilter(watched, event);
+    m_stack->setCurrentWidget(m_setupScroll);
+    loadStaticMap(QJsonArray());   // 进页先显示当前位置地图（需求 3 默认态）
 }
 
 MapNavigationDialog::NavMode MapNavigationDialog::selectedMode() const
@@ -534,8 +472,93 @@ QString MapNavigationDialog::directionLiteUrl(NavMode mode) const
     return url.toString(QUrl::FullyEncoded);
 }
 
+// 起终点文案集中在此生成：未设置时给提示语，避免常驻页面里出现「起点：（0.000000, 0.000000）」
+void MapNavigationDialog::updateRouteLabels()
+{
+    if (!m_originLabel || !m_destLabel) {
+        return;
+    }
+
+    if (m_originDesc.isEmpty() && qFuzzyIsNull(m_originLat) && qFuzzyIsNull(m_originLng)) {
+        m_originLabel->setText(QStringLiteral("起点：未设置（请在上方填写当前位置）"));
+    } else {
+        m_originLabel->setText(QStringLiteral("起点：%1\n（%2, %3）")
+                                   .arg(m_originDesc)
+                                   .arg(m_originLat, 0, 'f', 6)
+                                   .arg(m_originLng, 0, 'f', 6));
+    }
+
+    if (m_destName.trimmed().isEmpty()) {
+        m_destLabel->setText(QStringLiteral("终点：未选择（请到「电站选择」页点选电站后按「导航」）"));
+    } else {
+        m_destLabel->setText(QStringLiteral("终点：%1\n（%2, %3）")
+                                 .arg(m_destName)
+                                 .arg(m_destLat, 0, 'f', 6)
+                                 .arg(m_destLng, 0, 'f', 6));
+    }
+}
+
+// 需求 3：从「电站选择」页点「导航」后，直接在本页开导（不再弹模态窗）
+void MapNavigationDialog::startNavigationTo(const QString &originDesc, double originLat, double originLng,
+                                            const QString &destName, double destLat, double destLng,
+                                            const QString &destAddress)
+{
+    // 本页是常驻页面：起终点必须每次重写，否则第二次导航还会带着上一次的起点/终点
+    m_originDesc = originDesc.isEmpty() ? QStringLiteral("当前位置") : originDesc;
+    m_originLat = originLat;
+    m_originLng = originLng;
+    m_destName = destName;
+    m_destLat = destLat;
+    m_destLng = destLng;
+    m_region = guessRegionFromAddress(destAddress);
+    updateRouteLabels();
+
+    m_stack->setCurrentWidget(m_setupScroll);   // 回到设置视图，让「正在规划路线…」可见
+    onStartNavigation();                        // 免掉手动再点一次「开始导航」
+}
+
+// 需求 3 默认态：进页就显示地图，并标出当前位置
+void MapNavigationDialog::focusOnLocation(double lat, double lng, const QString &label)
+{
+    // 正在显示路线时不要覆盖掉路线图（用户可能只是切回来看一眼）
+    if (m_stack->currentWidget() == m_navPage) {
+        return;
+    }
+
+    m_originLat = lat;
+    m_originLng = lng;
+    if (!label.trimmed().isEmpty()) {
+        m_originDesc = label.trimmed();
+    }
+    updateRouteLabels();
+
+    m_stack->setCurrentWidget(m_setupScroll);
+
+#ifdef CHARGE_USE_WEBENGINE
+    // 和导航时用同一张可拖拽/缩放的地图。原来这里切到静态图（一张 PNG），
+    // 初始态既不能缩放也不能拖动，和导航时的地图手感不一致。
+    if (m_webView) {
+        loadInteractiveLocation(lat, lng, m_originDesc);
+        return;
+    }
+#endif
+    m_mapStack->setCurrentWidget(m_mapLabel);   // 无 WebEngine 时的兜底：静态图
+    loadStaticMap(QJsonArray());                // 空 steps = 当前位置视图
+}
+
 void MapNavigationDialog::onStartNavigation()
 {
+    // 本页现在常驻，「开始导航」在没有目的地/没有位置时也可能被点到，先给明确提示
+    if (m_destName.trimmed().isEmpty() || (qFuzzyIsNull(m_destLat) && qFuzzyIsNull(m_destLng))) {
+        QMessageBox::information(this, QStringLiteral("提示"),
+                                 QStringLiteral("请先选择充电站"));
+        return;
+    }
+    if (qFuzzyIsNull(m_originLat) && qFuzzyIsNull(m_originLng)) {
+        QMessageBox::information(this, QStringLiteral("提示"),
+                                 QStringLiteral("请先设置当前位置"));
+        return;
+    }
     if (m_baiduAk.trimmed().isEmpty()) {
         m_statusLabel->setText(QStringLiteral("未配置百度地图 AK，无法规划路线"));
         return;
@@ -635,7 +658,6 @@ void MapNavigationDialog::showNavigationResult(const QJsonObject &result)
     }
 
     m_stack->setCurrentWidget(m_navPage);
-    refitToParent(820);
 #ifdef CHARGE_USE_WEBENGINE
     if (m_webView) {
         m_webView->setFocus(Qt::OtherFocusReason);
@@ -653,6 +675,7 @@ void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps,
         return;
     }
 
+    m_pendingLocationView = false;   // 本次要显示的是路线
     m_pendingPathJson = buildPathJsonFromSteps(steps, routeOrigin, routeDest);
     m_pendingOriginLng = routeOrigin.value(QStringLiteral("lng")).toDouble();
     m_pendingOriginLat = routeOrigin.value(QStringLiteral("lat")).toDouble();
@@ -663,6 +686,17 @@ void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps,
     qDebug() << "[nav] path json size:" << m_pendingPathJson.size()
              << "preview:" << m_pendingPathJson.left(120);
 
+    ensureMapShellLoaded();
+}
+
+// 地图壳（buildBaiduMapShellHtml）只加载一次；调用前必须先把本次要显示的内容
+// （路线 or 当前位置）写进 pending 字段，就绪后由 applyPendingMapView() 派发。
+void MapNavigationDialog::ensureMapShellLoaded()
+{
+    if (!m_webView) {
+        return;
+    }
+
     if (!m_mapShellReady) {
         connect(m_webView->page(), &QWebEnginePage::loadFinished, this,
                 [this](bool ok) {
@@ -670,13 +704,13 @@ void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps,
                         return;
                     }
                     m_mapShellReady = true;
-                    QTimer::singleShot(300, this, &MapNavigationDialog::applyRouteOnMap);
+                    QTimer::singleShot(300, this, &MapNavigationDialog::applyPendingMapView);
                 },
                 Qt::SingleShotConnection);
         m_webView->setHtml(buildBaiduMapShellHtml(m_baiduAk),
                            QUrl(QStringLiteral("https://lbsyun.baidu.com/")));
     } else {
-        QTimer::singleShot(150, this, &MapNavigationDialog::applyRouteOnMap);
+        QTimer::singleShot(150, this, &MapNavigationDialog::applyPendingMapView);
     }
 }
 
@@ -714,6 +748,66 @@ void MapNavigationDialog::applyRouteOnMap()
 
     m_webView->page()->runJavaScript(js);
 }
+
+// 当前位置视图：把地图居中到该点并打一个标记，不画路线。
+// 地图壳本身已 enableDragging/enableScrollWheelZoom，所以这里不需要额外开放交互。
+void MapNavigationDialog::applyLocationOnMap()
+{
+    if (!m_webView || !m_mapShellReady) {
+        return;
+    }
+
+    QString labelJs;
+    if (!m_pendingLocLabel.trimmed().isEmpty()) {
+        labelJs = QStringLiteral(
+                      "mk.setLabel(new BMap.Label('%1',{offset:new BMap.Size(16,-10)}));")
+                      .arg(jsStringLiteral(m_pendingLocLabel));
+    }
+
+    const QString js = QStringLiteral(
+                           "(function(){"
+                           "if(typeof window.map==='undefined'||!window.map)return;"
+                           "if(window.map.checkResize)window.map.checkResize();"
+                           "var pt=new BMap.Point(%1,%2);"
+                           "window.map.clearOverlays();"
+                           "var mk=new BMap.Marker(pt);"
+                           "window.map.addOverlay(mk);"
+                           "%4"
+                           "window.map.centerAndZoom(pt,%3);"
+                           "})();")
+                       .arg(m_pendingLocLng, 0, 'f', 8)
+                       .arg(m_pendingLocLat, 0, 'f', 8)
+                       .arg(15)          // 与静态兜底图的 zoom 保持一致
+                       .arg(labelJs);
+
+    m_webView->page()->runJavaScript(js);
+}
+
+// 地图壳就绪后统一从这里派发：同一张地图要同时服务「当前位置」与「路线」两种视图
+void MapNavigationDialog::applyPendingMapView()
+{
+    if (m_pendingLocationView) {
+        applyLocationOnMap();
+    } else {
+        applyRouteOnMap();
+    }
+}
+
+void MapNavigationDialog::loadInteractiveLocation(double lat, double lng, const QString &label)
+{
+    if (!m_webView) {
+        return;
+    }
+
+    m_pendingLocationView = true;   // 本次要显示的是当前位置
+    m_pendingLocLat = lat;
+    m_pendingLocLng = lng;
+    m_pendingLocLabel = label;
+
+    m_mapStack->setCurrentWidget(m_webView);   // 初始态就用可拖拽/缩放的地图
+
+    ensureMapShellLoaded();
+}
 #else
 void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps,
                                              const QJsonObject &routeOrigin,
@@ -723,8 +817,18 @@ void MapNavigationDialog::loadInteractiveMap(const QJsonArray &steps,
     Q_UNUSED(routeOrigin);
     Q_UNUSED(routeDest);
 }
+
+// 无 WebEngine 的构建里没有可交互地图，focusOnLocation 会走静态图兜底
+void MapNavigationDialog::loadInteractiveLocation(double lat, double lng, const QString &label)
+{
+    Q_UNUSED(lat);
+    Q_UNUSED(lng);
+    Q_UNUSED(label);
+}
 #endif
 
+// 静态地图兜底渲染（无 WebEngine 时的唯一显示手段）。
+// steps 为空 = 当前位置视图：只放一个标记点，不打 paths。
 void MapNavigationDialog::loadStaticMap(const QJsonArray &steps)
 {
     if (m_baiduAk.trimmed().isEmpty()) {
@@ -732,49 +836,87 @@ void MapNavigationDialog::loadStaticMap(const QJsonArray &steps)
         return;
     }
 
-    QStringList pathPoints;
-    for (const QJsonValue &value : steps) {
-        const QString path = value.toObject().value(QStringLiteral("path")).toString();
-        for (const QString &pt : path.split(QLatin1Char(';'))) {
-            const QString trimmed = pt.trimmed();
-            if (!trimmed.isEmpty()) {
-                pathPoints << trimmed;
-            }
-        }
-    }
-    if (pathPoints.isEmpty()) {
-        pathPoints << QStringLiteral("%1,%2").arg(m_originLng, 0, 'f', 6).arg(m_originLat, 0, 'f', 6)
-                   << QStringLiteral("%1,%2").arg(m_destLng, 0, 'f', 6).arg(m_destLat, 0, 'f', 6);
+    const bool locationView = steps.isEmpty();
+    if (locationView && qFuzzyIsNull(m_originLat) && qFuzzyIsNull(m_originLng)) {
+        m_mapLabel->setText(QStringLiteral("（未设置当前位置）"));
+        return;
     }
 
-    const double centerLng = (m_originLng + m_destLng) / 2.0;
-    const double centerLat = (m_originLat + m_destLat) / 2.0;
-    const QString pathsParam = QStringLiteral("0x2B6BFF,4,1,") + pathPoints.join(QLatin1Char('|'));
+    // 同一张图不重复请求（每次切回「地图定位」Tab 都会走到这里）
+    const QString key = QStringLiteral("%1|%2|%3|%4|%5")
+                            .arg(m_originLat, 0, 'f', 6)
+                            .arg(m_originLng, 0, 'f', 6)
+                            .arg(m_destLat, 0, 'f', 6)
+                            .arg(m_destLng, 0, 'f', 6)
+                            .arg(locationView ? QStringLiteral("loc") : QStringLiteral("route"));
+    if (key == m_lastStaticMapKey) {
+        return;
+    }
+    m_lastStaticMapKey = key;
+
+    // 按地图控件实际像素请求（×2 供高分屏），百度静态图上限 1024。
+    // 原来写死 360×220 再靠 setScaledContents 拉伸，地图区一大就糊。
+    const QSize want = m_mapStack->size().expandedTo(QSize(360, 220)) * 2;
 
     QUrl url(QStringLiteral("https://api.map.baidu.com/staticimage/v2"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("ak"), m_baiduAk);
-    query.addQueryItem(QStringLiteral("center"),
-                       QStringLiteral("%1,%2").arg(centerLng, 0, 'f', 6).arg(centerLat, 0, 'f', 6));
-    query.addQueryItem(QStringLiteral("width"), QStringLiteral("360"));
-    query.addQueryItem(QStringLiteral("height"), QStringLiteral("220"));
-    query.addQueryItem(QStringLiteral("zoom"), QStringLiteral("13"));
-    query.addQueryItem(QStringLiteral("paths"), pathsParam);
+    query.addQueryItem(QStringLiteral("width"), QString::number(qBound(360, want.width(), 1024)));
+    query.addQueryItem(QStringLiteral("height"), QString::number(qBound(220, want.height(), 1024)));
     query.addQueryItem(QStringLiteral("coordtype"), QStringLiteral("bd09ll"));
+
+    if (locationView) {
+        const QString pt = QStringLiteral("%1,%2")
+                               .arg(m_originLng, 0, 'f', 6)
+                               .arg(m_originLat, 0, 'f', 6);
+        query.addQueryItem(QStringLiteral("center"), pt);
+        query.addQueryItem(QStringLiteral("zoom"), QStringLiteral("15"));
+        query.addQueryItem(QStringLiteral("markers"), pt);   // 标出当前位置
+    } else {
+        QStringList pathPoints;
+        for (const QJsonValue &value : steps) {
+            const QString path = value.toObject().value(QStringLiteral("path")).toString();
+            for (const QString &pt : path.split(QLatin1Char(';'))) {
+                const QString trimmed = pt.trimmed();
+                if (!trimmed.isEmpty()) {
+                    pathPoints << trimmed;
+                }
+            }
+        }
+        if (pathPoints.isEmpty()) {
+            pathPoints << QStringLiteral("%1,%2").arg(m_originLng, 0, 'f', 6).arg(m_originLat, 0, 'f', 6)
+                       << QStringLiteral("%1,%2").arg(m_destLng, 0, 'f', 6).arg(m_destLat, 0, 'f', 6);
+        }
+
+        const double centerLng = (m_originLng + m_destLng) / 2.0;
+        const double centerLat = (m_originLat + m_destLat) / 2.0;
+        query.addQueryItem(QStringLiteral("center"),
+                           QStringLiteral("%1,%2").arg(centerLng, 0, 'f', 6).arg(centerLat, 0, 'f', 6));
+        query.addQueryItem(QStringLiteral("zoom"), QStringLiteral("13"));
+        query.addQueryItem(QStringLiteral("paths"),
+                           QStringLiteral("0x2B6BFF,4,1,") + pathPoints.join(QLatin1Char('|')));
+    }
     url.setQuery(query);
 
     QNetworkRequest request(url);
     request.setRawHeader("Referer", "https://lbsyun.baidu.com/");
 
+    const int seq = ++m_staticMapSeq;
     QNetworkReply *reply = m_net->get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, seq]() {
         reply->deleteLater();
+        // 已有更新的请求发出：丢弃这个过期回包，否则旧图会盖掉新图
+        if (seq != m_staticMapSeq) {
+            return;
+        }
         if (reply->error() != QNetworkReply::NoError) {
+            m_lastStaticMapKey.clear();   // 失败不缓存标识，下次切页允许重试
             m_mapLabel->setText(QStringLiteral("（地图预览加载失败，请启用 WebEngine 获得更好效果）"));
             return;
         }
         QPixmap pix;
         if (!pix.loadFromData(reply->readAll())) {
+            m_lastStaticMapKey.clear();
             m_mapLabel->setText(QStringLiteral("（地图预览加载失败，请启用 WebEngine 获得更好效果）"));
             return;
         }
@@ -784,7 +926,8 @@ void MapNavigationDialog::loadStaticMap(const QJsonArray &steps)
 
 void MapNavigationDialog::onBackToSetup()
 {
-    m_stack->setCurrentWidget(m_setupPage);
+    m_stack->setCurrentWidget(m_setupScroll);
     m_statusLabel->setText(QStringLiteral("起终点已就绪，选择方式后点击「开始导航」。"));
-    refitToParent(460);
+    // 回到设置视图时把地图恢复为当前位置预览（m_stack 已切走，不会覆盖路线图）
+    focusOnLocation(m_originLat, m_originLng, m_originDesc);
 }

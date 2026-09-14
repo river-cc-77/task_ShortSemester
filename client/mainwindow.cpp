@@ -2,12 +2,15 @@
 #include "apiclient.h"
 #include "mapnavigationdialog.h"
 #include "uiutil.h"
+#include <QAbstractButton>
+#include <QButtonGroup>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QDialog>
@@ -29,6 +32,7 @@
 #include <QPainter>
 #include <QPen>
 #include <QPalette>
+#include <QPainterPath>
 #include <QResizeEvent>
 #include <QStyleOptionViewItem>
 
@@ -55,8 +59,33 @@ QString formatDurationSeconds(qint64 seconds)
     }
     return QStringLiteral("%1秒").arg(s);
 }
-constexpr int kItemTextTop    = 10;
-constexpr int kItemTextBottom = 12;   // 文本底到行底的留白（兼作与下一条的分隔感）
+constexpr int kAvatarSize     = 64;   // 个人中心头像直径（QSS 里 #profileAvatar 的 border-radius 须为其一半）
+
+// 圆形头像：QSS 的 border-radius 不会裁剪 pixmap，只能在绘制时把四角裁掉
+QPixmap roundedAvatarPixmap(const QPixmap &src, int size)
+{
+    if (src.isNull() || size <= 0) {
+        return {};
+    }
+
+    QPixmap out(size, size);
+    out.fill(Qt::transparent);
+
+    QPainter painter(&out);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QPainterPath clip;
+    clip.addEllipse(0, 0, size, size);
+    painter.setClipPath(clip);
+
+    // 按短边放大到铺满再居中裁切，非正方形头像才不会被压扁
+    const QPixmap scaled = src.scaled(size, size, Qt::KeepAspectRatioByExpanding,
+                                      Qt::SmoothTransformation);
+    painter.drawPixmap((size - scaled.width()) / 2, (size - scaled.height()) / 2, scaled);
+    return out;
+}
+
+constexpr int kItemTextTop    = 14;   // 14/16：单行条目约 50px，接近 48px 的手机触摸目标
+constexpr int kItemTextBottom = 16;   // 文本底到行底的留白（兼作与下一条的分隔感）
 constexpr int kScrollbarAllow = 10;   // 预留滚动条宽度，避免测量与绘制宽度不一致裁字
 
 class WrapItemDelegate : public QStyledItemDelegate
@@ -179,54 +208,157 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     resize(390, 844);                // 默认模拟手机竖屏尺寸，允许拉伸自适应不同屏幕
     setMinimumSize(320, 568);
 
-    // ================= 顶部卡片：欢迎语 + 导航按钮 =================
-    auto *headerCard = new QWidget(this);
-    headerCard->setObjectName(QStringLiteral("headerCard"));
-    headerCard->setAttribute(Qt::WA_StyledBackground, true);
+    auto *central = new QWidget(this);
+    central->setObjectName(QStringLiteral("centralWidget"));
 
-    m_userLabel = new QLabel(headerCard);
+    // 三个页面必须先全部建好：loadStations() 读 m_latEdit/m_lngEdit，
+    // 而这两个控件在「地图定位」页上（页1），不能等到用的时候才建。
+    m_pageStack = new QStackedWidget(central);
+    m_pageStack->setObjectName(QStringLiteral("pageStack"));
+    m_pageStack->addWidget(buildStationPage());   // 0 电站选择
+    m_pageStack->addWidget(buildMapPage());       // 1 地图定位
+    m_pageStack->addWidget(buildProfilePage());   // 2 个人中心
+
+    auto *layout = new QVBoxLayout(central);
+    layout->setContentsMargins(0, 0, 0, 0);   // 底部导航要贴到窗口边，故外边距归零
+    layout->setSpacing(0);
+    layout->addWidget(buildTopBar());
+    layout->addWidget(m_pageStack, 1);
+    layout->addWidget(buildBottomNav());
+    setCentralWidget(central);
+
+    m_netMgr = new QNetworkAccessManager(this);
+
+    // ================= 信号连接（四个入口按钮仍是同名成员，连接保持不变） =================
+    connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshStations);
+    connect(m_stationList, &QListWidget::itemClicked, this, &MainWindow::onStationItemClicked);
+    connect(m_regionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onRegionChanged);
+    connect(m_geocodeButton, &QPushButton::clicked, this, &MainWindow::onGeocodeAddress);
+    connect(m_addressEdit, &QLineEdit::returnPressed, this, &MainWindow::onGeocodeAddress);
+    connect(m_profileButton, &QPushButton::clicked, this, &MainWindow::onProfileCenter);
+    connect(m_orderButton, &QPushButton::clicked, this, &MainWindow::onOrderHistory);
+    connect(m_favoriteButton, &QPushButton::clicked, this, &MainWindow::onFavoriteList);
+    connect(m_announcementButton, &QPushButton::clicked, this, &MainWindow::onAnnouncementList);
+
+    switchPage(kPageStations);
+    refreshLocationChip();
+    loadStations();
+
+    QTimer::singleShot(0, this, [this]() { checkOpenOrder(false); });
+}
+
+// 底部导航切页。程序化切页时按钮不会自动变成选中态，所以必须同步 checked，
+// 否则会出现「页面是地图页、高亮却停在电站选择」的不一致（需求 1）。
+void MainWindow::switchPage(int index)
+{
+    if (!m_pageStack || index < 0 || index >= m_pageStack->count()) {
+        return;
+    }
+    m_pageStack->setCurrentIndex(index);
+    if (QAbstractButton *btn = m_tabGroup->button(index)) {
+        btn->setChecked(true);
+    }
+
+    // 需求 3 的默认态：进「地图定位」页就把地图显示出来（此时控件才有真实宽高）。
+    // 正在显示路线时 focusOnLocation() 内部会自行跳过，不会覆盖路线图。
+    if (index == kPageMap) {
+        m_mapPage->focusOnLocation(m_latEdit->text().toDouble(),
+                                   m_lngEdit->text().toDouble(),
+                                   m_addressEdit->text().trimmed());
+    }
+}
+
+// 页0 的位置摘要：经纬度输入在「地图定位」页，这里只做只读回显 + 跳转入口
+void MainWindow::refreshLocationChip()
+{
+    if (!m_locationChip) {
+        return;
+    }
+    const QString region = m_regionCombo->currentIndex() > 0
+                               ? m_regionCombo->currentText()
+                               : QStringLiteral("当前位置");
+    m_locationChip->setText(QStringLiteral("📍 %1   %2, %3")
+                                .arg(region)
+                                .arg(m_latEdit->text().trimmed())
+                                .arg(m_lngEdit->text().trimmed()));
+}
+
+// ================= 顶部栏：欢迎语 + 余额（三页共用一份，避免多处显示不同步） =================
+QWidget *MainWindow::buildTopBar()
+{
+    auto *topBar = new QWidget;
+    topBar->setObjectName(QStringLiteral("topBar"));
+
+    m_userLabel = new QLabel(topBar);
     m_userLabel->setObjectName(QStringLiteral("userGreet"));
     m_userLabel->setWordWrap(true);   // 昵称较长时窄屏自动换行，避免截断
     updateUserHeaderLabel();
 
-    m_profileButton = new QPushButton(QStringLiteral("个人中心"), headerCard);
-    m_orderButton = new QPushButton(QStringLiteral("订单历史"), headerCard);
-    m_favoriteButton = new QPushButton(QStringLiteral("我的收藏"), headerCard);
-    m_announcementButton = new QPushButton(QStringLiteral("公告"), headerCard);
-    m_profileButton->setCursor(Qt::PointingHandCursor);
-    m_orderButton->setCursor(Qt::PointingHandCursor);
-    m_favoriteButton->setCursor(Qt::PointingHandCursor);
-    m_announcementButton->setCursor(Qt::PointingHandCursor);
+    auto *lay = new QVBoxLayout(topBar);
+    lay->setContentsMargins(16, 10, 16, 10);
+    lay->setSpacing(0);
+    lay->addWidget(m_userLabel);
+    return topBar;
+}
 
-    auto *navRow = new QHBoxLayout;
-    navRow->setSpacing(8);
-    navRow->addWidget(m_profileButton, 1);
-    navRow->addWidget(m_orderButton, 1);
-    navRow->addWidget(m_favoriteButton, 1);
-    navRow->addWidget(m_announcementButton, 1);
+// ================= 页0：电站选择 =================
+QWidget *MainWindow::buildStationPage()
+{
+    auto *page = new QWidget;
+    page->setObjectName(QStringLiteral("pageStations"));
 
-    auto *headerLayout = new QVBoxLayout(headerCard);
-    headerLayout->setContentsMargins(16, 12, 16, 12);
-    headerLayout->setSpacing(8);
-    headerLayout->addWidget(m_userLabel);
-    headerLayout->addLayout(navRow);
+    // 位置摘要做成扁平按钮：既能显示当前定位，又是一个「进地图页改位置」的入口
+    m_locationChip = new QPushButton(page);
+    m_locationChip->setObjectName(QStringLiteral("locationChip"));
+    m_locationChip->setCursor(Qt::PointingHandCursor);
+    m_locationChip->setToolTip(QStringLiteral("点击进入「地图定位」页修改当前位置"));
+    connect(m_locationChip, &QPushButton::clicked, this, [this]() { switchPage(kPageMap); });
 
-    // ================= 查找/定位卡片 =================
-    auto *searchCard = new QWidget(this);
-    searchCard->setObjectName(QStringLiteral("searchCard"));
-    searchCard->setAttribute(Qt::WA_StyledBackground, true);
+    m_stationList = new WrapListWidget(page);   // 自动换行 + 行高自适应
+    m_stationList->setCursor(Qt::PointingHandCursor);
 
-    auto *searchLayout = new QVBoxLayout(searchCard);
-    searchLayout->setContentsMargins(14, 12, 14, 12);
-    searchLayout->setSpacing(8);
+    m_statusLabel = new QLabel(page);
+    m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
+    m_statusLabel->setWordWrap(true);   // 状态文字较长时换行，不用省略号
+
+    // 刷新（原在定位卡片里，定位输入搬去页1 后留在列表页更合理：它刷的是列表）
+    m_refreshButton = new QPushButton(QStringLiteral("刷新附近充电站"), page);
+    m_refreshButton->setProperty("class", "primary");
+    m_refreshButton->setMinimumHeight(40);
+    m_refreshButton->setCursor(Qt::PointingHandCursor);
+
+    auto *lay = new QVBoxLayout(page);
+    lay->setContentsMargins(12, 8, 12, 8);
+    lay->setSpacing(8);
+    lay->addWidget(m_locationChip);
+    lay->addWidget(m_stationList, 1);
+    lay->addWidget(m_statusLabel);
+    lay->addWidget(m_refreshButton);
+    return page;
+}
+
+// ================= 页1：地图定位（定位输入 + 常驻地图 + 导航） =================
+QWidget *MainWindow::buildMapPage()
+{
+    auto *page = new QWidget;
+    page->setObjectName(QStringLiteral("pageMap"));
+
+    auto *locationCard = new QWidget(page);
+    locationCard->setObjectName(QStringLiteral("searchCard"));
+    locationCard->setAttribute(Qt::WA_StyledBackground, true);
+
+    auto *searchLayout = new QVBoxLayout(locationCard);
+    searchLayout->setContentsMargins(12, 10, 12, 10);
+    searchLayout->setSpacing(6);
 
     // 当前位置（模拟 GPS）小标题
-    auto *sectionLabel = new QLabel(QStringLiteral("当前位置（模拟 GPS）"), searchCard);
+    auto *sectionLabel = new QLabel(QStringLiteral("当前位置（模拟 GPS）"), locationCard);
     sectionLabel->setObjectName(QStringLiteral("sectionTitle"));
 
     // 经纬度（两列均分）
-    m_latEdit = new QLineEdit(QStringLiteral("22.5431"), searchCard);
-    m_lngEdit = new QLineEdit(QStringLiteral("114.0579"), searchCard);
+    m_latEdit = new QLineEdit(QStringLiteral("22.5431"), locationCard);
+    m_lngEdit = new QLineEdit(QStringLiteral("114.0579"), locationCard);
     m_latEdit->setObjectName(QStringLiteral("latEdit"));
     m_lngEdit->setObjectName(QStringLiteral("lngEdit"));
     m_latEdit->setPlaceholderText(QStringLiteral("纬度"));
@@ -234,14 +366,14 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
 
     auto *locRow = new QHBoxLayout;
     locRow->setSpacing(6);
-    locRow->addWidget(new QLabel(QStringLiteral("lat"), searchCard));
+    locRow->addWidget(new QLabel(QStringLiteral("lat"), locationCard));
     locRow->addWidget(m_latEdit, 1);
     locRow->addSpacing(8);
-    locRow->addWidget(new QLabel(QStringLiteral("lng"), searchCard));
+    locRow->addWidget(new QLabel(QStringLiteral("lng"), locationCard));
     locRow->addWidget(m_lngEdit, 1);
 
     // 区域下拉（整行）
-    m_regionCombo = new QComboBox(searchCard);
+    m_regionCombo = new QComboBox(locationCard);
     m_regionCombo->addItem(QStringLiteral("— 请选择 —"), QVariant());
     m_regionCombo->addItem(QStringLiteral("北京 天安门"), QVariantList{39.9042, 116.4074});
     m_regionCombo->addItem(QStringLiteral("上海 外滩"), QVariantList{31.2397, 121.4908});
@@ -251,14 +383,14 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
 
     auto *regionRow = new QHBoxLayout;
     regionRow->setSpacing(8);
-    regionRow->addWidget(new QLabel(QStringLiteral("选择区域"), searchCard));
+    regionRow->addWidget(new QLabel(QStringLiteral("选择区域"), locationCard));
     regionRow->addWidget(m_regionCombo, 1);
 
     // 地址输入 + 地理编码
-    m_addressEdit = new QLineEdit(searchCard);
+    m_addressEdit = new QLineEdit(locationCard);
     m_addressEdit->setPlaceholderText(QStringLiteral("输入地址，如：深圳市南山区科技园"));
     m_addressEdit->setAttribute(Qt::WA_InputMethodEnabled, true);
-    m_geocodeButton = new QPushButton(QStringLiteral("地理编码"), searchCard);
+    m_geocodeButton = new QPushButton(QStringLiteral("地理编码"), locationCard);
     m_geocodeButton->setCursor(Qt::PointingHandCursor);
 
     auto *addrRow = new QHBoxLayout;
@@ -266,49 +398,112 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &user, QWidget *parent)
     addrRow->addWidget(m_addressEdit, 1);
     addrRow->addWidget(m_geocodeButton);
 
-    // 刷新（全宽主按钮）
-    m_refreshButton = new QPushButton(QStringLiteral("刷新附近充电站"), searchCard);
-    m_refreshButton->setProperty("class", "primary");
-    m_refreshButton->setMinimumHeight(42);
-    m_refreshButton->setCursor(Qt::PointingHandCursor);
-
     searchLayout->addWidget(sectionLabel);
     searchLayout->addLayout(locRow);
     searchLayout->addLayout(regionRow);
     searchLayout->addLayout(addrRow);
-    searchLayout->addWidget(m_refreshButton);
 
-    // ================= 站点列表 + 状态行 =================
-    m_stationList = new WrapListWidget(this);   // 自动换行 + 行高自适应
-    m_statusLabel = new QLabel(this);
-    m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
-    m_statusLabel->setWordWrap(true);   // 状态文字较长时换行，不用省略号
+    // 地图 + 导航：原 MapNavigationDialog 已改为常驻页面
+    m_mapPage = new MapNavigationDialog(m_baiduAk);
+    connect(m_mapPage, &MapNavigationDialog::requestBack, this, [this]() {
+        switchPage(kPageStations);
+    });
 
-    auto *central = new QWidget(this);
-    auto *layout = new QVBoxLayout(central);
-    layout->setContentsMargins(12, 10, 12, 8);
-    layout->setSpacing(10);
-    layout->addWidget(headerCard);
-    layout->addWidget(searchCard);
-    layout->addWidget(m_stationList, 1);
-    layout->addWidget(m_statusLabel);
-    setCentralWidget(central);
+    auto *lay = new QVBoxLayout(page);
+    lay->setContentsMargins(12, 8, 12, 8);
+    lay->setSpacing(8);
+    lay->addWidget(locationCard);
+    lay->addWidget(m_mapPage, 1);
+    return page;
+}
 
-    // ================= 信号连接（保持不变） =================
-    connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshStations);
-    connect(m_stationList, &QListWidget::itemClicked, this, &MainWindow::onStationItemClicked);
-    m_netMgr = new QNetworkAccessManager(this);
-    connect(m_regionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::onRegionChanged);
-    connect(m_geocodeButton, &QPushButton::clicked, this, &MainWindow::onGeocodeAddress);
-    connect(m_addressEdit, &QLineEdit::returnPressed, this, &MainWindow::onGeocodeAddress);
-    connect(m_profileButton, &QPushButton::clicked, this, &MainWindow::onProfileCenter);
-    connect(m_orderButton, &QPushButton::clicked, this, &MainWindow::onOrderHistory);
-    connect(m_favoriteButton, &QPushButton::clicked, this, &MainWindow::onFavoriteList);
-    connect(m_announcementButton, &QPushButton::clicked, this, &MainWindow::onAnnouncementList);
-    loadStations();
+// ================= 页2：个人中心（只做入口，二级界面仍是弹窗） =================
+QWidget *MainWindow::buildProfilePage()
+{
+    auto *page = new QWidget;
+    page->setObjectName(QStringLiteral("pageProfile"));
 
-    QTimer::singleShot(0, this, [this]() { checkOpenOrder(false); });
+    auto *profileCard = new QWidget(page);
+    profileCard->setObjectName(QStringLiteral("profileCard"));
+    profileCard->setAttribute(Qt::WA_StyledBackground, true);
+
+    m_avatarLabel = new QLabel(profileCard);
+    m_avatarLabel->setObjectName(QStringLiteral("profileAvatar"));
+    m_avatarLabel->setFixedSize(kAvatarSize, kAvatarSize);
+    m_avatarLabel->setAlignment(Qt::AlignCenter);
+
+    m_profileSummaryLabel = new QLabel(profileCard);
+    m_profileSummaryLabel->setObjectName(QStringLiteral("profileSummary"));
+    m_profileSummaryLabel->setWordWrap(true);
+    updateUserHeaderLabel();   // 顺带把头像和概览一起填上（头像进页就能看到）
+
+    auto *infoRow = new QHBoxLayout;
+    infoRow->setSpacing(12);
+    infoRow->addWidget(m_avatarLabel, 0, Qt::AlignTop);
+    infoRow->addWidget(m_profileSummaryLabel, 1);
+
+    auto *cardLay = new QVBoxLayout(profileCard);
+    cardLay->setContentsMargins(16, 12, 16, 12);
+    cardLay->setSpacing(6);
+    cardLay->addLayout(infoRow);
+
+    // 四个入口沿用原顶部卡片上的同名按钮对象 → mainwindow.cpp 里原有的 connect 全部继续有效
+    m_profileButton = new QPushButton(QStringLiteral("编辑资料"), page);
+    m_orderButton = new QPushButton(QStringLiteral("订单历史"), page);
+    m_favoriteButton = new QPushButton(QStringLiteral("我的收藏"), page);
+    m_announcementButton = new QPushButton(QStringLiteral("系统公告"), page);
+    m_profileButton->setCursor(Qt::PointingHandCursor);
+    m_orderButton->setCursor(Qt::PointingHandCursor);
+    m_favoriteButton->setCursor(Qt::PointingHandCursor);
+    m_announcementButton->setCursor(Qt::PointingHandCursor);
+
+    auto *lay = new QVBoxLayout(page);
+    lay->setContentsMargins(12, 8, 12, 8);
+    lay->setSpacing(8);
+    lay->addWidget(profileCard);
+    lay->addWidget(m_profileButton);
+    lay->addWidget(m_orderButton);
+    lay->addWidget(m_favoriteButton);
+    lay->addWidget(m_announcementButton);
+    lay->addStretch();
+    return page;
+}
+
+// ================= 底部导航：三个 Tab =================
+QWidget *MainWindow::buildBottomNav()
+{
+    auto *nav = new QWidget;
+    nav->setObjectName(QStringLiteral("bottomNav"));
+    nav->setAttribute(Qt::WA_StyledBackground, true);
+    nav->setFixedHeight(62);
+
+    m_tabStations = new QPushButton(QStringLiteral("电站选择"), nav);
+    m_tabMap = new QPushButton(QStringLiteral("地图定位"), nav);
+    m_tabProfile = new QPushButton(QStringLiteral("个人中心"), nav);
+    // objectName 逐个写明（不放进平行数组）：QSS 靠它命中 #navTab*，也便于直接 grep
+    m_tabStations->setObjectName(QStringLiteral("navTabStations"));
+    m_tabMap->setObjectName(QStringLiteral("navTabMap"));
+    m_tabProfile->setObjectName(QStringLiteral("navTabProfile"));
+
+    m_tabGroup = new QButtonGroup(this);
+    m_tabGroup->setExclusive(true);   // 恒有且仅有一个高亮
+
+    const QList<QPushButton *> tabs = {m_tabStations, m_tabMap, m_tabProfile};
+
+    auto *lay = new QHBoxLayout(nav);
+    lay->setContentsMargins(4, 0, 4, 0);
+    lay->setSpacing(0);
+    for (int i = 0; i < tabs.size(); ++i) {
+        QPushButton *btn = tabs.at(i);
+        // 必须 checkable，否则 QSS 的 :checked 永不匹配 → 选中项没有高亮
+        btn->setCheckable(true);
+        btn->setCursor(Qt::PointingHandCursor);
+        m_tabGroup->addButton(btn, i);
+        lay->addWidget(btn, 1);
+    }
+
+    connect(m_tabGroup, &QButtonGroup::idClicked, this, &MainWindow::switchPage);
+    return nav;
 }
 
 
@@ -475,8 +670,16 @@ void MainWindow::showStationDetail(int stationId)
     const QString destName = station.value(QStringLiteral("name")).toString();
     const QString destAddress = station.value(QStringLiteral("address")).toString();
 
-    connect(navBtn, &QPushButton::clicked, &dlg, [this, destLat, destLng, destName, destAddress]() {
-        showMapNavigation(destLat, destLng, destName, destAddress);
+    connect(navBtn, &QPushButton::clicked, &dlg,
+            [this, &dlg, destLat, destLng, destName, destAddress]() {
+        // 需求 3：点「导航」= 关掉详情、切到地图定位页开始导航，不再叠一层模态窗。
+        // 这里不能当场切页：dlg 还在自己的 exec() 模态事件循环里，切了也会被模态盖住。
+        m_pendingNav = true;
+        m_pendingDestName = destName;
+        m_pendingDestLat = destLat;
+        m_pendingDestLng = destLng;
+        m_pendingDestAddress = destAddress;
+        dlg.accept();   // 退出模态循环；真正的切页留到 exec() 返回之后
     });
 
     // 填充电桩列表
@@ -582,6 +785,13 @@ void MainWindow::showStationDetail(int stationId)
     });
 
     dlg.exec();
+
+    // 详情弹窗已关闭、模态循环已退出，此时切页才不会被盖住
+    if (m_pendingNav) {
+        m_pendingNav = false;
+        startNavigationOnMapPage(m_pendingDestLat, m_pendingDestLng,
+                                 m_pendingDestName, m_pendingDestAddress);
+    }
 }
 
 // 下拉选区域：直接把预设经纬度填到输入框
@@ -595,6 +805,10 @@ void MainWindow::onRegionChanged(int index)
     m_lngEdit->setText(QString::number(pos[1].toDouble(), 'f', 6));
     m_statusLabel->setText(QStringLiteral("已选择区域：%1")
                                .arg(m_regionCombo->itemText(index)));
+    refreshLocationChip();
+    // 地图页正显示当前位置预览时跟着换到新区域（正在显示路线时 focusOnLocation 会自行跳过）
+    m_mapPage->focusOnLocation(pos[0].toDouble(), pos[1].toDouble(),
+                               m_regionCombo->itemText(index));
 }
 
 // 地址输入框回车或点按钮：调百度地图 API 转经纬度
@@ -625,6 +839,9 @@ void MainWindow::onGeocodeAddress()
                                .arg(address)
                                .arg(m_latEdit->text())
                                .arg(m_lngEdit->text()));
+    refreshLocationChip();
+    m_mapPage->focusOnLocation(result.value(QStringLiteral("lat")).toDouble(),
+                               result.value(QStringLiteral("lng")).toDouble(), address);
 }
 
 // 调用百度地图地理编码 API（同步等待）
@@ -1123,6 +1340,20 @@ void MainWindow::onFavoriteList()
 
     loadFavorites();
 
+    // 点收藏项 → 关掉收藏窗，回到「电站选择」并打开该站详情。
+    // 不能在这里直接开详情弹窗：收藏窗还在自己的 exec() 里，再叠一层模态（父窗口是
+    // MainWindow）层级会乱。所以照搬「导航」那套：先记下意图并 accept()，等 exec() 返回后再做。
+    bool pendingOpen = false;
+    int pendingStationId = 0;
+    connect(listWidget, &QListWidget::itemClicked, &dlg, [&](QListWidgetItem *item) {
+        if (!item || item->data(Qt::UserRole).isNull()) {
+            return;   // 「暂无收藏的充电站」是占位行，没有 station id
+        }
+        pendingOpen = true;
+        pendingStationId = item->data(Qt::UserRole).toInt();
+        dlg.accept();
+    });
+
     connect(removeBtn, &QPushButton::clicked, &dlg, [&]() {
         QListWidgetItem *item = listWidget->currentItem();
         if (!item || item->data(Qt::UserRole).isNull()) {
@@ -1145,11 +1376,19 @@ void MainWindow::onFavoriteList()
     });
 
     dlg.exec();
+
+    // 点收藏项后：跳到「电站选择」页，并直接打开该站的详情（电桩列表、预约、导航都在里面）
+    if (pendingOpen) {
+        switchPage(kPageStations);
+        showStationDetail(pendingStationId);
+    }
 }
 
-void MainWindow::showMapNavigation(double destLat, double destLng, const QString &destName,
-                                   const QString &destAddress)
+// 需求 3：跳到「地图定位」页并在那里直接开始导航（原来是在这里弹一个模态导航窗）
+void MainWindow::startNavigationOnMapPage(double destLat, double destLng, const QString &destName,
+                                          const QString &destAddress)
 {
+    // 两处参数校验与提示语保持原样
     if (destName.trimmed().isEmpty() || (qFuzzyIsNull(destLat) && qFuzzyIsNull(destLng))) {
         QMessageBox::warning(this, QStringLiteral("提示"),
                              QStringLiteral("请先选择充电站"));
@@ -1166,13 +1405,16 @@ void MainWindow::showMapNavigation(double destLat, double destLng, const QString
     const double originLng = m_lngEdit->text().toDouble();
 
     QString originDesc = m_addressEdit->text().trimmed();
+    if (originDesc.isEmpty() && m_regionCombo->currentIndex() > 0) {
+        originDesc = m_regionCombo->currentText();
+    }
     if (originDesc.isEmpty()) {
         originDesc = QStringLiteral("当前位置");
     }
 
-    MapNavigationDialog navDlg(originDesc, originLat, originLng,
-                               destName, destLat, destLng, m_baiduAk, destAddress, this);
-    navDlg.exec();
+    switchPage(kPageMap);   // 自动跳转到「地图定位」界面
+    m_mapPage->startNavigationTo(originDesc, originLat, originLng,
+                                 destName, destLat, destLng, destAddress);
 }
 
 void MainWindow::onAnnouncementList()
@@ -1246,6 +1488,15 @@ void MainWindow::onAnnouncementList()
         detailDlg.exec();
     });
 
+    // 需求 2：手机端单击即查看（双击是桌面习惯）。双击连接与「查看详情」按钮都保留，
+    // 三种入口最终都走 viewBtn 的同一个 lambda。
+    connect(listWidget, &QListWidget::itemClicked, &dlg, [&](QListWidgetItem *item) {
+        if (!item || item->data(Qt::UserRole).isNull()) {
+            return;
+        }
+        viewBtn->click();
+    });
+
     connect(listWidget, &QListWidget::itemDoubleClicked, &dlg, [&](QListWidgetItem *item) {
         if (!item) {
             return;
@@ -1258,10 +1509,35 @@ void MainWindow::onAnnouncementList()
 
 void MainWindow::updateUserHeaderLabel()
 {
-    if (!m_userLabel) return;
-    m_userLabel->setText(QStringLiteral("欢迎，%1 | 余额 %2 元")
-                             .arg(m_user.value(QStringLiteral("nickname")).toString())
-                             .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2));
+    if (m_userLabel) {
+        m_userLabel->setText(QStringLiteral("欢迎，%1 | 余额 %2 元")
+                                 .arg(m_user.value(QStringLiteral("nickname")).toString())
+                                 .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2));
+    }
+    // 页2 的账户概览与顶栏同源，一并刷新（两处都从 m_user 取值，不会不一致）
+    if (m_profileSummaryLabel) {
+        m_profileSummaryLabel->setText(
+            QStringLiteral("昵称：%1\n手机号：%2\n账户状态：%3\n余额：%4 元")
+                .arg(m_user.value(QStringLiteral("nickname")).toString())
+                .arg(m_user.value(QStringLiteral("phone")).toString())
+                .arg(m_user.value(QStringLiteral("status")).toString())
+                .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2));
+    }
+    // 页2 头像与概览同源。放在这里刷新，所以「一进个人中心」就能看到头像，
+    // 而不是必须点开「编辑资料」才显示。
+    if (m_avatarLabel) {
+        const QString avatarPath = m_user.value(QStringLiteral("avatar_path")).toString();
+        const QPixmap avatar(avatarPath);
+        if (avatar.isNull()) {
+            // 未设置头像或文件已不在：用昵称首字占位，比写「无头像」更像手机应用
+            const QString nickname = m_user.value(QStringLiteral("nickname")).toString().trimmed();
+            m_avatarLabel->setPixmap(QPixmap());   // 必须清掉，否则改回无头像时会残留旧图
+            m_avatarLabel->setText(nickname.isEmpty() ? QStringLiteral("?") : nickname.left(1));
+        } else {
+            m_avatarLabel->setText(QString());
+            m_avatarLabel->setPixmap(roundedAvatarPixmap(avatar, kAvatarSize));
+        }
+    }
 }
 
 bool MainWindow::refreshUserProfile()

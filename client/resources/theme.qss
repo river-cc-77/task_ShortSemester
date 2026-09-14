@@ -51,10 +51,6 @@ QLineEdit, QTextEdit, QComboBox {
     selection-color: #1F2D4D;
 }
 
-QLineEdit:hover, QComboBox:hover {
-    border-color: #A9C4F0;
-}
-
 QLineEdit:focus, QComboBox:focus {
     border-color: #2B6BFF;
     background-color: #FFFFFF;
@@ -104,11 +100,6 @@ QComboBox QAbstractItemView::item {
     border-radius: 6px;
 }
 
-QComboBox QAbstractItemView::item:hover {
-    background-color: #F0F6FF;
-    color: #2B6BFF;
-}
-
 /* ------------------------- 通用按钮 ------------------------- */
 QPushButton {
     background-color: #FFFFFF;
@@ -117,12 +108,6 @@ QPushButton {
     border-radius: 8px;
     padding: 8px 18px;
     min-height: 20px;
-}
-
-QPushButton:hover {
-    background-color: #F0F6FF;
-    border-color: #A9C4F0;
-    color: #2B6BFF;
 }
 
 QPushButton:pressed {
@@ -148,13 +133,6 @@ QPushButton[class="primary"] {
     font-weight: 600;
 }
 
-QPushButton[class="primary"]:hover {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                stop:0 #4F8BFF, stop:1 #336FFF);
-    border-color: #1A50D0;
-    color: #FFFFFF;
-}
-
 QPushButton[class="primary"]:pressed {
     background: #1F5AE6;
     border-color: #1A50D0;
@@ -175,12 +153,6 @@ QPushButton[class="danger"] {
     font-weight: 600;
 }
 
-QPushButton[class="danger"]:hover {
-    background-color: #FADCDC;
-    border-color: #E9A3A3;
-    color: #D6363B;
-}
-
 /* 成功/正向操作按钮 */
 QPushButton[class="success"] {
     background-color: #E8F7EE;
@@ -189,24 +161,12 @@ QPushButton[class="success"] {
     font-weight: 600;
 }
 
-QPushButton[class="success"]:hover {
-    background-color: #D4EFDD;
-    border-color: #92D4AC;
-    color: #128A4C;
-}
-
 /* 次要信息按钮（青色） */
 QPushButton[class="info"] {
     background-color: #E8F6FD;
     color: #0E8FC0;
     border-color: #BFE3F4;
     font-weight: 600;
-}
-
-QPushButton[class="info"]:hover {
-    background-color: #D3EDFA;
-    border-color: #8FCBE8;
-    color: #0B7DAB;
 }
 
 /* ------------------------- 列表 ------------------------- */
@@ -227,10 +187,6 @@ QListWidget::item {
     border-radius: 6px;
 }
 
-QListWidget::item:hover {
-    background-color: #F0F6FF;
-}
-
 QListWidget::item:selected {
     background-color: #DCE8FF;
     color: #1F2D4D;
@@ -249,10 +205,6 @@ QScrollBar::handle:vertical {
     min-height: 30px;
 }
 
-QScrollBar::handle:vertical:hover {
-    background: #A8B6C9;
-}
-
 QScrollBar:horizontal {
     background: transparent;
     height: 8px;
@@ -263,10 +215,6 @@ QScrollBar::handle:horizontal {
     background: #C4CFDE;
     border-radius: 4px;
     min-width: 30px;
-}
-
-QScrollBar::handle:horizontal:hover {
-    background: #A8B6C9;
 }
 
 QScrollBar::add-line, QScrollBar::sub-line {
@@ -319,27 +267,32 @@ QLabel#errorLabel {
 }
 
 /* ============================================================
-   主窗口（浅色内容区 + 白色圆角卡片）
+   主窗口：蓝系渐变铺底 + 白色圆角卡片（原来是纯色 #EDF2F9）
    ============================================================ */
 QMainWindow#MainWindow {
-    background-color: #EDF2F9;
+    background: qlineargradient(x1:0, y1:0, x2:0.35, y2:1,
+                                stop:0 #E8F0FC, stop:0.55 #DCE8FA, stop:1 #C9DBF5);
 }
 
-/* 顶部标题卡片 */
-QWidget#headerCard {
-    background-color: #FFFFFF;
-    border: 1px solid #E3EAF4;
-    border-radius: 12px;
+/* 页面容器必须透明，否则渐变背景被盖住 */
+QWidget#centralWidget,
+QStackedWidget#pageStack,
+QWidget#pageStations,
+QWidget#pageMap,
+QWidget#pageProfile,
+QWidget#topBar {
+    background: transparent;
 }
 
+/* 顶部欢迎栏：三页共用一份，透明叠在渐变上 */
 QLabel#userGreet {
     font-size: 12pt;
     font-weight: 700;
     color: #1F2D4D;
 }
 
-/* 查找/定位卡片 */
-QWidget#searchCard {
+/* 定位输入卡片 / 个人中心卡片 */
+QWidget#searchCard, QWidget#profileCard {
     background-color: #FFFFFF;
     border: 1px solid #E3EAF4;
     border-radius: 12px;
@@ -357,11 +310,38 @@ QLineEdit#latEdit, QLineEdit#lngEdit {
     min-width: 88px;
 }
 
-/* 顶部卡片导航按钮（手机紧凑样式） */
-QWidget#headerCard QPushButton {
-    padding: 7px 4px;
-    border-radius: 8px;
-    font-size: 10pt;
+/* 页0 的位置摘要：扁平按钮，既是回显也是进地图页的入口 */
+QPushButton#locationChip {
+    background-color: #FFFFFF;
+    border: 1px solid #E3EAF4;
+    border-radius: 10px;
+    color: #2B6BFF;
+    font-size: 9.5pt;
+    text-align: left;
+    padding: 9px 12px;
+}
+/* 个人中心头像：正圆（border-radius 必须是直径 64 的一半）。
+   无头像时以昵称首字占位，所以这里也定义了配色与字号。 */
+QLabel#profileAvatar {
+    background-color: #E8F0FC;
+    border-radius: 32px;
+    color: #2B6BFF;
+    font-size: 20pt;
+    font-weight: 700;
+}
+
+/* 个人中心账户概览 */
+QLabel#profileSummary {
+    color: #25324F;
+    font-size: 10.5pt;
+    line-height: 150%;
+}
+
+/* 个人中心的四个入口按钮（手机紧凑样式，原在顶部卡片里） */
+QWidget#pageProfile QPushButton {
+    padding: 12px 8px;
+    border-radius: 10px;
+    font-size: 10.5pt;
 }
 
 /* 底部状态行 */
@@ -371,14 +351,53 @@ QLabel#statusLabel {
     padding: 2px 4px;
 }
 
-/* 地图导航内页（限制在手机主窗范围内） */
-QDialog#navDialog {
-    background-color: #EDF2F9;
+/* ============================================================
+   底部导航（手机三 Tab）：深蓝渐变 + 选中项青色顶条
+   ============================================================ */
+QWidget#bottomNav {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #0B1B33, stop:0.5 #0F2440, stop:1 #0D2446);
+    border-top: 1px solid #16304F;
 }
 
-QDialog#navDialog QPushButton[class="primary"] {
+QPushButton#navTabStations, QPushButton#navTabMap, QPushButton#navTabProfile {
+    background: transparent;
+    border: none;
+    border-top: 3px solid transparent;   /* 占位，避免选中时文字跳动 */
+    color: #8FA0BA;
+    font-size: 10pt;
+    padding: 10px 4px;
+}
+
+/* 选中态：三个 Tab 都设了 checkable，否则 :checked 永不匹配 */
+QPushButton#navTabStations:checked, QPushButton#navTabMap:checked,
+QPushButton#navTabProfile:checked {
+    color: #FFFFFF;
+    font-weight: 700;
+    border-top: 3px solid #00C6F5;
+}
+
+/* ============================================================
+   地图定位页（原导航弹窗，现为常驻页面）
+   注意：类名不再是 QDialog，类型选择器必须同步改为 QWidget，
+   否则这条规则静默失效、导航页掉样式。
+   ============================================================ */
+QWidget#navDialog {
+    background: transparent;
+}
+
+QWidget#navDialog QPushButton[class="primary"] {
     font-size: 11pt;
     min-height: 42px;
+}
+
+/* 线路设置面板的滚动区：只滚内容，不要边框和底色 */
+QScrollArea#navSetupScroll {
+    background: transparent;
+    border: none;
+}
+QScrollArea#navSetupScroll > QWidget > QWidget {
+    background: transparent;
 }
 
 QLabel#navMapPreview {
