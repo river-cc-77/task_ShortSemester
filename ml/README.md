@@ -60,7 +60,8 @@ cd .. && bash ml/run_pipeline.sh   # 导出 + predict_local
 |------|------|
 | `run_pipeline.sh` | **Linux 主入口**：检测 ads → collector → 导出 → PySpark → 预测 → 评估 → verify |
 | `run_pipeline.py` | Python 入口（Windows 可用 `--bootstrap-ads`） |
-| `generate_orders.py` | 批量插入模拟「已完成」订单 |
+| `generate_orders.py` | 批量插入模拟「已完成」订单（含今日配额） |
+| `ensure_today_orders.py` | 为今天补订单，避免 ads 最新日全 0 |
 | `export_to_hdfs.py` | 导出 ads 表 CSV；`HDFS_URI=hdfs://… --upload` 上传 HDFS |
 | `pyspark_clean.py` | PySpark 清洗 hourly 数据 |
 | `pyspark_analytics.py` | PySpark 10 维分析 + 2 交叉对比 |

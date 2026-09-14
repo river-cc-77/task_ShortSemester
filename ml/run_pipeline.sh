@@ -27,6 +27,8 @@ done
 if [[ "$GENERATE" != "0" ]]; then
     python3 ml/generate_orders.py "$GENERATE"
 fi
+# 确保今日有订单（避免 ads 最新日全 0）
+python3 ml/ensure_today_orders.py
 
 # 2. ads_* 为空则跑 collector（Linux 正式路径）
 HOURLY=$(sqlite3 db/charge.db "SELECT COUNT(*) FROM ads_station_hourly;" 2>/dev/null || echo 0)

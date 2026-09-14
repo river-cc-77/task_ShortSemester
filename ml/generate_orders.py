@@ -65,17 +65,12 @@ def main() -> int:
     end_day = datetime.now().replace(hour=22, minute=0, second=0, microsecond=0)
     start_day = end_day - timedelta(days=args.days)
 
-    inserted = 0
-    for _ in range(args.count):
+    def write_order(start: datetime) -> None:
+        nonlocal seq, inserted
         user_id = random.choice(users)
         pile_id, station_id, power_kw, price = random.choice(piles)
         if price is None or price <= 0:
             price = stations.get(station_id, 1.2)
-
-        day_offset = random.randint(0, max(args.days - 1, 0))
-        hour = random.randint(7, 22)
-        minute = random.randint(0, 59)
-        start = (start_day + timedelta(days=day_offset)).replace(hour=hour, minute=minute)
         duration_min = random.randint(20, 90)
         end = start + timedelta(minutes=duration_min)
         kwh = round(float(power_kw) * duration_min / 60.0, 2)
@@ -91,7 +86,6 @@ def main() -> int:
         reserve_at = (start - timedelta(minutes=random.randint(3, 8))).strftime("%Y-%m-%d %H:%M:%S")
         ts = start.strftime("%Y-%m-%d %H:%M:%S")
         end_ts = end.strftime("%Y-%m-%d %H:%M:%S")
-
         cur.execute(
             """
             INSERT INTO charge_order
@@ -102,6 +96,24 @@ def main() -> int:
             (order_no, user_id, station_id, pile_id, reserve_at, ts, end_ts, kwh, amount, ts),
         )
         inserted += 1
+
+    inserted = 0
+    today_base = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_quota = max(120, args.count // 15)
+    for i in range(today_quota):
+        hour = 7 + (i % 16)
+        minute = random.randint(0, 59)
+        start = today_base.replace(hour=hour, minute=minute)
+        if start > datetime.now():
+            start = datetime.now() - timedelta(minutes=random.randint(20, 240))
+        write_order(start)
+
+    for _ in range(args.count):
+        day_offset = random.randint(0, max(args.days - 1, 0))
+        hour = random.randint(7, 22)
+        minute = random.randint(0, 59)
+        start = (start_day + timedelta(days=day_offset)).replace(hour=hour, minute=minute)
+        write_order(start)
 
     conn.commit()
     conn.close()

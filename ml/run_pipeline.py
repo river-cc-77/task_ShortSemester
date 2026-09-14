@@ -87,6 +87,7 @@ def main() -> int:
 
     if args.generate > 0:
         run_py("generate_orders.py", str(args.generate))
+        run_py("ensure_today_orders.py")
         if platform.system() == "Linux" and COLLECTOR_BIN.is_file():
             try_run_collector()
 

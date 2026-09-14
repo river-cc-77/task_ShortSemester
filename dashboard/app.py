@@ -133,56 +133,6 @@ def api_time_forecast():
     return jsonify(rows_to_dicts(rows))
 
 
-def _hourly_from_orders(conn, stat_date: str | None = None):
-    """ads_station_hourly 为空时，从 charge_order 按小时聚合。"""
-    if stat_date is None:
-        row = conn.execute(
-            """
-            SELECT MAX(date(start_at))
-            FROM charge_order
-            WHERE start_at IS NOT NULL AND status IN ('已完成', '待支付')
-            """
-        ).fetchone()
-        stat_date = row[0] if row else None
-    if not stat_date:
-        return []
-    return conn.execute(
-        """
-        SELECT CAST(strftime('%H', start_at) AS INTEGER) AS stat_hour,
-               COALESCE(SUM(kwh), 0) AS kwh,
-               COUNT(*) AS orders
-        FROM charge_order
-        WHERE date(start_at) = ?
-          AND start_at IS NOT NULL
-          AND status IN ('已完成', '待支付')
-        GROUP BY stat_hour
-        ORDER BY stat_hour
-        """,
-        (stat_date,),
-    ).fetchall()
-
-
-def _rank_from_orders(conn):
-    """ads_station_daily 为空时，从 charge_order 按站汇总。"""
-    return conn.execute(
-        """
-        SELECT s.name,
-               COUNT(*) AS orders,
-               COALESCE(SUM(o.amount), 0) AS revenue,
-               COALESCE(SUM(o.kwh), 0) AS kwh,
-               0.0 AS utilization,
-               NULL AS peak_hour,
-               0.0 AS fault_rate
-        FROM charge_order o
-        JOIN station s ON s.id = o.station_id
-        WHERE o.status IN ('已完成', '待支付')
-        GROUP BY s.id, s.name
-        ORDER BY revenue DESC
-        LIMIT 10
-        """
-    ).fetchall()
-
-
 @app.route("/api/station_hourly_today")
 def api_station_hourly_today():
     conn = connect()
@@ -207,8 +157,6 @@ def api_station_hourly_today():
             ORDER BY h.stat_hour
             """
         ).fetchall()
-    if not rows:
-        rows = _hourly_from_orders(conn)
     conn.close()
     return jsonify(rows_to_dicts(rows))
 
@@ -226,8 +174,6 @@ def api_station_rank():
         LIMIT 10
         """
     ).fetchall()
-    if not rows:
-        rows = _rank_from_orders(conn)
     conn.close()
     return jsonify(rows_to_dicts(rows))
 
