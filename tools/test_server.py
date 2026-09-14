@@ -505,11 +505,27 @@ def main() -> int:
     if new_station_id not in station_ids:
         raise RuntimeError("station.create id not found in station.admin.list")
 
-    # id=28 pile.restart — 远程重启故障桩 SZ002-03（seed 为故障），应写 operation_log
+    # id=28 pile.restart — 远程重启故障桩（可重复跑：先确保目标桩为「故障」）
+    restart_pile_no = "SZ002-03"
+    pile_list = run_test(
+        host, port,
+        {"id": "28a", "cmd": "pile.list", "token": admin_token, "data": {}},
+        "pile.list before restart",
+    )
+    piles_by_no = {p["pile_no"]: p for p in pile_list["data"]["items"]}
+    if restart_pile_no not in piles_by_no:
+        raise RuntimeError(f"{restart_pile_no} not found in pile.list")
+    if piles_by_no[restart_pile_no]["status"] != "故障":
+        run_test(
+            host, port,
+            {"id": "28b", "cmd": "pile.update", "token": admin_token,
+             "data": {"pile_no": restart_pile_no, "status": "故障"}},
+            "pile.update restore fault for restart test",
+        )
     run_test(
         host, port,
         {"id": "28", "cmd": "pile.restart", "token": admin_token,
-         "data": {"pile_no": "SZ002-03"}},
+         "data": {"pile_no": restart_pile_no}},
         "pile.restart",
     )
 
