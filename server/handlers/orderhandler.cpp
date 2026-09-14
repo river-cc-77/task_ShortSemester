@@ -467,37 +467,3 @@ QJsonObject OrderHandler::buildProgressPayload(const QJsonObject &order)
     responseData[QStringLiteral("estimated_remain_seconds")] = estimatedRemain;
     return responseData;
 }
-
-QJsonArray OrderHandler::activeChargingOrders()
-{
-    return DbManager::instance().fetchChargingOrders();
-}
-
-QJsonObject OrderHandler::buildProgressPayload(const QJsonObject &order)
-{
-    if (order.isEmpty()) {
-        return {};
-    }
-
-    double kwh = 0.0;
-    double amount = 0.0;
-    qint64 elapsedSeconds = 0;
-    qint64 estimatedRemain = 0;
-
-    if (order.value(QStringLiteral("status")).toString() == QStringLiteral("充电中")) {
-        calcCharge(order, kwh, amount, elapsedSeconds);
-        estimatedRemain = calcEstimatedRemainSeconds(order, kwh);
-    } else {
-        kwh = order.value(QStringLiteral("kwh")).toDouble();
-        amount = order.value(QStringLiteral("amount")).toDouble();
-    }
-
-    QJsonObject responseData;
-    responseData[QStringLiteral("order_no")] = order.value(QStringLiteral("order_no")).toString();
-    responseData[QStringLiteral("status")] = order.value(QStringLiteral("status")).toString();
-    responseData[QStringLiteral("kwh")] = kwh;
-    responseData[QStringLiteral("amount")] = amount;
-    responseData[QStringLiteral("elapsed_seconds")] = static_cast<qint64>(elapsedSeconds);
-    responseData[QStringLiteral("estimated_remain_seconds")] = estimatedRemain;
-    return responseData;
-}
