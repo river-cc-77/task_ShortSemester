@@ -84,11 +84,194 @@ def run_test_error(
     return resp
 
 
-def cleanup_open_order(host: str, port: int, token: str, admin_token: Optional[str] = None) -> None:
+def _db_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "db" / "charge.db"
+
+
+def _db_connect():
+    import sqlite3
+
+    db_path = _db_path()
+    if not db_path.is_file():
+        return None
+    return sqlite3.connect(db_path)
+
+
+def reset_user_balance(user_id: int, balance: float) -> None:
+    """测试辅助：将用户余额重置为 seed 值（仅本地 db/charge.db）。"""
+    conn = _db_connect()
+    if conn is None:
+        return
+    conn.execute("UPDATE user SET balance = ? WHERE id = ?", (balance, user_id))
+    conn.commit()
+    conn.close()
+    print(f"\n>>> reset user_id={user_id} balance -> {balance}")
+
+
+def ensure_user_status(user_id: int, status: str) -> None:
+    conn = _db_connect()
+    if conn is None:
+        return
+    conn.execute("UPDATE user SET status = ? WHERE id = ?", (status, user_id))
+    conn.commit()
+    conn.close()
+    print(f"\n>>> ensure user_id={user_id} status -> {status}")
+
+
+def ensure_pile_status(pile_no: str, status: str) -> None:
+    """仅当桩非预约/在用时可改（避免破坏进行中的单）。"""
+    conn = _db_connect()
+    if conn is None:
+        return
+    row = conn.execute("SELECT status FROM pile WHERE pile_no = ?", (pile_no,)).fetchone()
+    if row and row[0] in ("预约", "在用"):
+        print(f"\n>>> skip ensure_pile_status {pile_no}: currently {row[0]}")
+        conn.close()
+        return
+    conn.execute("UPDATE pile SET status = ? WHERE pile_no = ?", (status, pile_no))
+    conn.commit()
+    conn.close()
+    print(f"\n>>> ensure pile {pile_no} status -> {status}")
+
+
+def ensure_8002_seed_pending_order() -> None:
+    """恢复 8002 的 seed「待支付」单，供 33a~33c / id=29 重复跑。"""
+    conn = _db_connect()
+    if conn is None:
+        return
+    open_row = conn.execute(
+        "SELECT order_no, status FROM charge_order "
+        "WHERE user_id = 2 AND status IN ('预约', '充电中', '待支付') LIMIT 1"
+    ).fetchone()
+    if open_row and open_row[0] == "CD20260828002" and open_row[1] == "待支付":
+        conn.close()
+        return
+    if open_row and open_row[0] != "CD20260828002":
+        conn.execute(
+            "UPDATE charge_order SET status = '已完成' "
+            "WHERE user_id = 2 AND order_no = ?",
+            (open_row[0],),
+        )
+
+    pile_row = conn.execute("SELECT id FROM pile WHERE pile_no = 'SZ001-05'").fetchone()
+    if not pile_row:
+        conn.close()
+        return
+    pile_id = pile_row[0]
+
+    exists = conn.execute(
+        "SELECT 1 FROM charge_order WHERE order_no = 'CD20260828002'"
+    ).fetchone()
+    if exists:
+        conn.execute(
+            """
+            UPDATE charge_order
+            SET user_id = 2, station_id = 1, pile_id = ?, status = '待支付',
+                reserve_at = '2026-08-28 13:00:00', start_at = '2026-08-28 13:05:00',
+                end_at = '2026-08-28 13:40:00', kwh = 28.50, amount = 34.20,
+                created_at = '2026-08-28 13:00:00'
+            WHERE order_no = 'CD20260828002'
+            """,
+            (pile_id,),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO charge_order
+                (order_no, user_id, station_id, pile_id, status,
+                 reserve_at, start_at, end_at, kwh, amount, created_at)
+            VALUES ('CD20260828002', 2, 1, ?, '待支付',
+                    '2026-08-28 13:00:00', '2026-08-28 13:05:00', '2026-08-28 13:40:00',
+                    28.50, 34.20, '2026-08-28 13:00:00')
+            """,
+            (pile_id,),
+        )
+    conn.execute("UPDATE pile SET status = '闲置' WHERE pile_no = 'SZ001-05'")
+    conn.commit()
+    conn.close()
+    print("\n>>> ensure 8002 seed pending order CD20260828002")
+
+
+def prepare_section8_fixtures(host: str, port: int, admin_token: str) -> None:
+    """§8 边界测试前恢复 seed 关键状态，避免重复跑失败。"""
+    ensure_user_status(3, "正常")
+    ensure_user_status(6, "冻结")
+    ensure_pile_status("SZ001-03", "故障")
+
+    user8002 = send_request(
+        host, port,
+        {"id": "prep8002", "cmd": "user.login", "data": {"phone": "13800138002"}},
+    )
+    if user8002.get("ok"):
+        open8002 = send_request(
+            host, port,
+            {"id": "prep8002b", "cmd": "order.check_open",
+             "token": user8002["data"]["token"], "data": {}},
+        )
+        if open8002.get("data", {}).get("has_open"):
+            order_no = open8002["data"]["order"]["order_no"]
+            if order_no != "CD20260828002":
+                cleanup_open_order(host, port, user8002["data"]["token"], admin_token)
+    ensure_8002_seed_pending_order()
+
+    user8004 = send_request(
+        host, port,
+        {"id": "prep8004", "cmd": "user.login", "data": {"phone": "13800138004"}},
+    )
+    if user8004.get("ok"):
+        cleanup_open_order(
+            host, port, user8004["data"]["token"], admin_token,
+            reset_balance=3.0, reset_user_id=4,
+        )
+
+
+def pick_idle_pile(host: str, port: int, admin_token: str) -> Optional[dict]:
+    """从 pile.list 取当前闲置桩（避免使用旧的 station.detail 快照）。"""
+    resp = send_request(
+        host, port,
+        {"id": "pick_idle", "cmd": "pile.list", "token": admin_token, "data": {}},
+    )
+    if not resp.get("ok"):
+        return None
+    for pile in resp["data"]["items"]:
+        if pile.get("status") == "闲置":
+            return pile
+    return None
+
+
+def ensure_pile_fault_for_restart(host: str, port: int, admin_token: str, pile_no: str) -> None:
+    """pile.restart 前确保目标桩为故障（可重复跑）。"""
+    pile_list = send_request(
+        host, port,
+        {"id": "prep_restart", "cmd": "pile.list", "token": admin_token, "data": {}},
+    )
+    if not pile_list.get("ok"):
+        raise RuntimeError("pile.list failed before restart prep")
+    piles_by_no = {p["pile_no"]: p for p in pile_list["data"]["items"]}
+    if pile_no not in piles_by_no:
+        raise RuntimeError(f"{pile_no} not found in pile.list")
+    if piles_by_no[pile_no]["status"] != "故障":
+        run_test(
+            host, port,
+            {"id": "prep_restart_upd", "cmd": "pile.update", "token": admin_token,
+             "data": {"pile_no": pile_no, "status": "故障"}},
+            f"pile.update restore fault {pile_no}",
+        )
+
+
+def cleanup_open_order(
+    host: str,
+    port: int,
+    token: str,
+    admin_token: Optional[str] = None,
+    *,
+    reset_balance: Optional[float] = None,
+    reset_user_id: Optional[int] = None,
+) -> None:
     """清理指定用户身上残留的未完成订单，使测试可重复跑而不用重建数据库。
 
     按状态推进：预约→start→充电中→stop→待支付→settle→已完成；
-    用户余额不足时尝试管理员代结算。
+    余额不足时先充值再结算；可选 reset_balance 恢复低余额测试账号。
     """
     resp = send_request(
         host, port,
@@ -121,20 +304,51 @@ def cleanup_open_order(host: str, port: int, token: str, admin_token: Optional[s
         status = "待支付"
 
     if status == "待支付":
-        settle = send_request(
-            host, port,
-            {"id": "cleanup3", "cmd": "charge.settle", "token": token,
-             "data": {"order_no": order_no}},
-        )
-        if not settle.get("ok") and admin_token:
+        amount = float(order.get("amount", 0))
+
+        def try_settle() -> dict:
+            return send_request(
+                host, port,
+                {"id": "cleanup3", "cmd": "charge.settle", "token": token,
+                 "data": {"order_no": order_no}},
+            )
+
+        settle = try_settle()
+        if not settle.get("ok") and settle.get("error", {}).get("code") == "BALANCE_NOT_ENOUGH":
+            recharge_amt = max(amount * 2, 100.0)
             run_test(
+                host, port,
+                {"id": "cleanup3b", "cmd": "user.recharge", "token": token,
+                 "data": {"amount": recharge_amt}},
+                "cleanup user.recharge (for settle)",
+            )
+            settle = try_settle()
+
+        if not settle.get("ok") and admin_token:
+            admin_settle = send_request(
                 host, port,
                 {"id": "cleanup4", "cmd": "order.admin.settle", "token": admin_token,
                  "data": {"order_no": order_no}},
-                "cleanup order.admin.settle",
             )
+            if not admin_settle.get("ok") and admin_settle.get("error", {}).get("code") == "BALANCE_NOT_ENOUGH":
+                run_test(
+                    host, port,
+                    {"id": "cleanup4b", "cmd": "user.recharge", "token": token,
+                     "data": {"amount": max(amount * 2, 100.0)}},
+                    "cleanup user.recharge (for admin settle)",
+                )
+                admin_settle = send_request(
+                    host, port,
+                    {"id": "cleanup4c", "cmd": "order.admin.settle", "token": admin_token,
+                     "data": {"order_no": order_no}},
+                )
+            if not admin_settle.get("ok"):
+                raise RuntimeError(f"cleanup order.admin.settle failed: {admin_settle}")
         elif not settle.get("ok"):
             raise RuntimeError(f"cleanup settle failed: {settle}")
+
+        if reset_balance is not None and reset_user_id is not None:
+            reset_user_balance(reset_user_id, reset_balance)
 
 
 def main() -> int:
@@ -339,12 +553,7 @@ def main() -> int:
         raise RuntimeError("8001 should have no open order before charge flow")
 
     # --- 充电主流程：预约 → 开始 → 查进度 → 停止 → 结算 ---
-    # 从详情里找「闲置」桩；没有则跳过（seed 被其他测试改乱时）
-    idle_pile = None
-    for p in piles:
-        if p["status"] == "闲置":
-            idle_pile = p
-            break
+    idle_pile = pick_idle_pile(host, port, admin_token)
     if idle_pile is None:
         print("\nWARNING: no idle pile found, skipping charge flow tests")
     else:
@@ -477,6 +686,8 @@ def main() -> int:
 
     # ===== §8 管理端写操作 + 业务边界拦截 =====
 
+    prepare_section8_fixtures(host, port, admin_token)
+
     # id=26 station.create — 新建电站（随机站名避免重复）；并自动创建 fast/slow 桩
     test_station_name = "自动化测试站" + str(random.randint(100, 999))
     created = run_test(
@@ -507,21 +718,7 @@ def main() -> int:
 
     # id=28 pile.restart — 远程重启故障桩（可重复跑：先确保目标桩为「故障」）
     restart_pile_no = "SZ002-03"
-    pile_list = run_test(
-        host, port,
-        {"id": "28a", "cmd": "pile.list", "token": admin_token, "data": {}},
-        "pile.list before restart",
-    )
-    piles_by_no = {p["pile_no"]: p for p in pile_list["data"]["items"]}
-    if restart_pile_no not in piles_by_no:
-        raise RuntimeError(f"{restart_pile_no} not found in pile.list")
-    if piles_by_no[restart_pile_no]["status"] != "故障":
-        run_test(
-            host, port,
-            {"id": "28b", "cmd": "pile.update", "token": admin_token,
-             "data": {"pile_no": restart_pile_no, "status": "故障"}},
-            "pile.update restore fault for restart test",
-        )
+    ensure_pile_fault_for_restart(host, port, admin_token, restart_pile_no)
     run_test(
         host, port,
         {"id": "28", "cmd": "pile.restart", "token": admin_token,
@@ -596,6 +793,7 @@ def main() -> int:
     )
 
     # id=33d 故障桩 SZ001-03 不可预约 → PILE_FAULT
+    ensure_pile_status("SZ001-03", "故障")
     run_test_error(
         host, port,
         {"id": "33d", "cmd": "charge.reserve", "token": token,
@@ -605,13 +803,16 @@ def main() -> int:
     )
 
     # --- id=33e~33j 桩已被预约/占用时，他人不可再预约 ---
+    ensure_user_status(3, "正常")
     user8003 = run_test(
         host, port,
         {"id": "33e", "cmd": "user.login", "data": {"phone": "13800138003"}},
         "user.login 8003",
     )
     token8003 = user8003["data"]["token"]
+    cleanup_open_order(host, port, token8003, admin_token)
     busy_pile_no = "SZ005-04"
+    ensure_pile_status(busy_pile_no, "闲置")
     # 8003 先占住 SZ005-04
     busy_reserve = run_test(
         host, port,
@@ -628,25 +829,7 @@ def main() -> int:
         "charge.reserve PILE_BUSY",
         "PILE_BUSY",
     )
-    # 清理 8003 占用的桩，避免影响后续测试
-    run_test(
-        host, port,
-        {"id": "33h", "cmd": "charge.start", "token": token8003,
-         "data": {"order_no": busy_order_no}},
-        "charge.start 8003 cleanup",
-    )
-    run_test(
-        host, port,
-        {"id": "33i", "cmd": "charge.stop", "token": token8003,
-         "data": {"order_no": busy_order_no}},
-        "charge.stop 8003 cleanup",
-    )
-    run_test(
-        host, port,
-        {"id": "33j", "cmd": "charge.settle", "token": token8003,
-         "data": {"order_no": busy_order_no}},
-        "charge.settle 8003 cleanup",
-    )
+    cleanup_open_order(host, port, token8003, admin_token)
 
     # id=33k 用户 token 不能调管理端 stats.overview → FORBIDDEN
     run_test_error(
@@ -673,8 +856,10 @@ def main() -> int:
         "user.login 8004 (low balance)",
     )
     token8004 = user8004["data"]["token"]
-    # 上次若在 33q 中断，8004 会残留「待支付」单，需先清理再预约
-    cleanup_open_order(host, port, token8004, admin_token)
+    # 上次若在 33q 中断，8004 会残留「待支付」单；清理后恢复 seed 低余额 3.00
+    cleanup_open_order(
+        host, port, token8004, admin_token, reset_balance=3.0, reset_user_id=4,
+    )
     low_balance_pile = "SZ002-01"
     low_reserve = run_test(
         host, port,
@@ -767,11 +952,8 @@ def main() -> int:
     )
 
     # id=42~46 预约中的桩不可 restart；走完流程后测管理员代结算
-    idle_pile2 = None
-    for p in piles:
-        if p["status"] == "闲置":
-            idle_pile2 = p
-            break
+    cleanup_open_order(host, port, token, admin_token)
+    idle_pile2 = pick_idle_pile(host, port, admin_token)
     if idle_pile2 is not None:
         reserve2 = run_test(
             host, port,
@@ -806,11 +988,8 @@ def main() -> int:
         )
 
     # id=47~51 用户「充电中」时不可被冻结；测完清理订单
-    idle_pile3 = None
-    for p in piles:
-        if p["status"] == "闲置":
-            idle_pile3 = p
-            break
+    cleanup_open_order(host, port, token, admin_token)
+    idle_pile3 = pick_idle_pile(host, port, admin_token)
     if idle_pile3 is not None:
         reserve3 = run_test(
             host, port,
@@ -837,11 +1016,7 @@ def main() -> int:
             {"id": "50", "cmd": "charge.stop", "token": token, "data": {"order_no": order3}},
             "charge.stop cleanup",
         )
-        run_test(
-            host, port,
-            {"id": "51", "cmd": "charge.settle", "token": token, "data": {"order_no": order3}},
-            "charge.settle cleanup",
-        )
+        cleanup_open_order(host, port, token, admin_token)
 
     # id=52~54 forecast.list — 负荷预测（读 load_forecast 表）；非法 horizon 应失败
     run_test(
