@@ -384,6 +384,7 @@ std::optional<QJsonObject> DbManager::fetchStationDetail(int stationId)
     QJsonObject detail;
     detail["station"] = station;
     detail["piles"] = piles;
+    detail["forecast"] = fetchStationForecastBundle(stationId);
     return detail;
 }
 
@@ -1649,6 +1650,22 @@ QJsonArray DbManager::fetchForecasts(const QString &horizon, int stationId)
         items.append(row);
     }
     return items;
+}
+
+QJsonObject DbManager::fetchStationForecastBundle(int stationId)
+{
+    QJsonObject bundle;
+    for (const QString &h : {QStringLiteral("1h"), QStringLiteral("6h"), QStringLiteral("24h")}) {
+        QJsonArray loadRows = fetchForecasts(h, stationId);
+        if (!loadRows.isEmpty()) {
+            bundle[QStringLiteral("load_") + h] = loadRows.first().toObject();
+        }
+        QJsonArray timeRows = fetchTimeForecasts(h, stationId);
+        if (!timeRows.isEmpty()) {
+            bundle[QStringLiteral("time_") + h] = timeRows.first().toObject();
+        }
+    }
+    return bundle;
 }
 
 QJsonArray DbManager::fetchTimeForecasts(const QString &horizon, int stationId)

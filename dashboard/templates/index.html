@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>东软充电桩 — 智能分析大屏</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #0b1220;
+      color: #e8eef7;
+      min-height: 100vh;
+    }
+    header {
+      padding: 20px 28px 12px;
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 { font-size: 24px; font-weight: 600; }
+    header .sub { color: #94a3b8; font-size: 13px; margin-top: 4px; }
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+      padding: 18px 28px;
+    }
+    .kpi {
+      background: linear-gradient(145deg, #111827, #0f172a);
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+    .kpi .label { color: #94a3b8; font-size: 13px; }
+    .kpi .value { font-size: 26px; font-weight: 700; margin-top: 8px; color: #38bdf8; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      padding: 0 28px 28px;
+    }
+    .panel {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 12px;
+      min-height: 340px;
+    }
+    .panel.full { grid-column: 1 / -1; min-height: 380px; }
+    .panel h2 {
+      font-size: 15px;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+      padding-left: 4px;
+    }
+    .chart { width: 100%; height: 300px; }
+    .chart.tall { height: 340px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>东软电动汽车充电桩 — 机器学习智能分析大屏</h1>
+      <div class="sub">负荷预测 · 充电时长预测 · 运营 KPI · 设备状态</div>
+    </div>
+    <div class="sub" id="updatedAt">加载中...</div>
+  </header>
+
+  <section class="kpi-row" id="kpiRow"></section>
+
+  <section class="grid">
+    <div class="panel"><h2>近 30 日营收趋势</h2><div id="revenueChart" class="chart"></div></div>
+    <div class="panel"><h2>电桩状态分布</h2><div id="pileChart" class="chart"></div></div>
+    <div class="panel"><h2>充电高峰曲线（平台 × 小时）</h2><div id="hourlyChart" class="chart"></div></div>
+    <div class="panel"><h2>电站排行（最近一日营收）</h2><div id="rankChart" class="chart"></div></div>
+    <div class="panel full"><h2>各站负荷预测（1h / 6h / 24h）</h2><div id="loadChart" class="chart tall"></div></div>
+    <div class="panel full"><h2>充电时长与高峰时段预测</h2><div id="timeChart" class="chart tall"></div></div>
+  </section>
+
+  <script>
+    async function fetchJson(url) {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(url + ' failed');
+      return resp.json();
+    }
+
+    function renderKpi(kpi) {
+      const d = kpi.latest_daily || {};
+      const cards = [
+        ['充电站', kpi.station_count ?? '-'],
+        ['电桩总数', kpi.pile_count ?? '-'],
+        ['当前空闲桩', kpi.idle_piles ?? '-'],
+        ['最近日营收(元)', d.total_revenue != null ? Number(d.total_revenue).toFixed(2) : '-'],
+        ['最近日订单', d.order_count ?? '-'],
+      ];
+      document.getElementById('kpiRow').innerHTML = cards.map(([label, value]) =>
+        `<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div></div>`
+      ).join('');
+      document.getElementById('updatedAt').textContent = '刷新时间：' + (kpi.updated_at || '');
+    }
+
+    function renderRevenue(data) {
+      const chart = echarts.init(document.getElementById('revenueChart'));
+      chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        grid: { left: 48, right: 20, top: 30, bottom: 30 },
+        xAxis: { type: 'category', data: data.map(r => r.stat_date), axisLabel: { color: '#94a3b8' } },
+        yAxis: { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1f2937' } } },
+        series: [{ name: '营收', type: 'line', smooth: true, data: data.map(r => r.total_revenue), areaStyle: {}, color: '#38bdf8' }]
+      });
+    }
+
+    function renderPileStatus(data) {
+      const chart = echarts.init(document.getElementById('pileChart'));
+      chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'item' },
+        legend: { bottom: 0, textStyle: { color: '#cbd5e1' } },
+        series: [{
+          type: 'pie', radius: ['40%', '68%'],
+          data: data.map(r => ({ name: r.status, value: r.cnt })),
+          label: { color: '#e2e8f0' }
+        }]
+      });
+    }
+
+    function renderHourly(data) {
+      const chart = echarts.init(document.getElementById('hourlyChart'));
+      chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['电量 kWh', '订单数'], textStyle: { color: '#cbd5e1' } },
+        grid: { left: 48, right: 20, top: 40, bottom: 30 },
+        xAxis: { type: 'category', data: data.map(r => r.stat_hour + ':00'), axisLabel: { color: '#94a3b8' } },
+        yAxis: [
+          { type: 'value', name: 'kWh', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1f2937' } } },
+          { type: 'value', name: '单', axisLabel: { color: '#94a3b8' }, splitLine: { show: false } }
+        ],
+        series: [
+          { name: '电量 kWh', type: 'bar', data: data.map(r => r.kwh), color: '#22c55e' },
+          { name: '订单数', type: 'line', yAxisIndex: 1, data: data.map(r => r.orders), color: '#f59e0b' }
+        ]
+      });
+    }
+
+    function renderRank(data) {
+      const chart = echarts.init(document.getElementById('rankChart'));
+      chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        grid: { left: 100, right: 20, top: 20, bottom: 30 },
+        xAxis: { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1f2937' } } },
+        yAxis: { type: 'category', data: data.map(r => r.name).reverse(), axisLabel: { color: '#94a3b8', width: 90, overflow: 'truncate' } },
+        series: [{ type: 'bar', data: data.map(r => r.revenue).reverse(), color: '#818cf8' }]
+      });
+    }
+
+    function renderLoadForecast(data) {
+      const horizons = ['1h', '6h', '24h'];
+      const stations = [...new Set(data.map(r => r.station_name))];
+      const chart = echarts.init(document.getElementById('loadChart'));
+      chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { data: horizons, textStyle: { color: '#cbd5e1' } },
+        grid: { left: 48, right: 20, top: 40, bottom: 80 },
+        xAxis: { type: 'category', data: stations, axisLabel: { color: '#94a3b8', rotate: 20 } },
+        yAxis: { type: 'value', name: '预测负荷 kWh', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1f2937' } } },
+        series: horizons.map(h => ({
+          name: h,
+          type: 'bar',
+          data: stations.map(name => {
+            const row = data.find(r => r.station_name === name && r.horizon === h);
+            return row ? row.predicted_load : 0;
+          })
+        }))
+      });
+    }
+
+    function renderTimeForecast(data) {
+      const chart = echarts.init(document.getElementById('timeChart'));
+      const items = data.filter(r => r.horizon === '1h');
+      chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['预测时长(分)', '高峰小时'], textStyle: { color: '#cbd5e1' } },
+        grid: { left: 48, right: 48, top: 40, bottom: 80 },
+        xAxis: { type: 'category', data: items.map(r => r.station_name), axisLabel: { color: '#94a3b8', rotate: 20 } },
+        yAxis: [
+          { type: 'value', name: '分钟', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1f2937' } } },
+          { type: 'value', name: '小时', min: 0, max: 23, axisLabel: { color: '#94a3b8' }, splitLine: { show: false } }
+        ],
+        series: [
+          { name: '预测时长(分)', type: 'bar', data: items.map(r => r.predicted_avg_duration_min), color: '#14b8a6' },
+          { name: '高峰小时', type: 'line', yAxisIndex: 1, data: items.map(r => r.predicted_peak_hour ?? 0), color: '#fb7185' }
+        ]
+      });
+    }
+
+    async function loadAll() {
+      try {
+        const [kpi, revenue, pile, hourly, rank, load, time] = await Promise.all([
+          fetchJson('/api/kpi'),
+          fetchJson('/api/revenue_trend'),
+          fetchJson('/api/pile_status'),
+          fetchJson('/api/station_hourly_today'),
+          fetchJson('/api/station_rank'),
+          fetchJson('/api/load_forecast'),
+          fetchJson('/api/time_forecast'),
+        ]);
+        renderKpi(kpi);
+        renderRevenue(revenue);
+        renderPileStatus(pile);
+        renderHourly(hourly);
+        renderRank(rank);
+        renderLoadForecast(load);
+        renderTimeForecast(time);
+      } catch (e) {
+        document.getElementById('updatedAt').textContent = '加载失败：' + e.message;
+      }
+    }
+
+    loadAll();
+    setInterval(loadAll, 60000);
+  </script>
+</body>
+</html>

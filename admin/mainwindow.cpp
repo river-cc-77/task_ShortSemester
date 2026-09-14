@@ -18,8 +18,25 @@
 #include <QFrame>
 #include <QBrush>
 #include <QComboBox>
+#include <QDesktopServices>
+#include <QUrl>
+
+#ifdef CHARGE_USE_WEBENGINE
+#include <QWebEngineView>
+#endif
 
 namespace {
+
+QString dashboardUrl()
+{
+    return qEnvironmentVariable("DASHBOARD_URL", QStringLiteral("http://127.0.0.1:5000/"));
+}
+
+void styleActionBtn(QPushButton *btn, const char *cls)
+{
+    btn->setProperty("class", cls);
+    btn->setCursor(Qt::PointingHandCursor);
+}
 
 void configureTable(QTableWidget *t,
                     const QVector<int> &stretchCols,
@@ -533,6 +550,8 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     pileStatusLay->addWidget(m_labPileHealth);
     ui->gridLayout->addWidget(m_cardPileStatus, 4, 0, 1, 2);
 
+    setupForecastPage();
+    setupDashboardPage();
     setupPagination();
     reloadUserList("");
     reloadOverviewStat();
@@ -546,9 +565,11 @@ MainWindow::~MainWindow()
 void MainWindow::resetAllBtnSelect()
 {
     auto btns = {ui->btnOverview, ui->btnPile, ui->btnStation, ui->btnUser,
-                 ui->btnOrder, ui->btnAnnouncement, ui->btnLog};
-    for(auto btn : btns)
-    {
+                 ui->btnOrder, ui->btnAnnouncement, ui->btnLog, m_btnForecast, m_btnDashboard};
+    for (auto btn : btns) {
+        if (!btn) {
+            continue;
+        }
         btn->setProperty("selected", false);
         refreshBtnStyle(btn);
     }
@@ -1978,5 +1999,252 @@ void MainWindow::updatePileStatusOverview(const QJsonObject &pileStat, int pileT
     m_labPileHealth->setText(
         QStringLiteral("健康度（非故障占比）：%1%")
             .arg(healthRate * 100.0, 0, 'f', 1));
+}
+
+void MainWindow::setupForecastPage()
+{
+    m_btnForecast = new QPushButton(QStringLiteral("智能预测"), ui->sideBarWidget);
+    m_btnForecast->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_btnForecast->setCursor(Qt::PointingHandCursor);
+    const int insertIdx = ui->verticalLayout->indexOf(ui->verticalSpacer_5);
+    ui->verticalLayout->insertWidget(insertIdx, m_btnForecast);
+
+    m_pageForecast = new QWidget;
+    auto *pageLay = new QVBoxLayout(m_pageForecast);
+    auto *toolbar = new QHBoxLayout;
+    auto *title = new QLabel(QStringLiteral("充电负荷与时长智能预测（ML）"));
+    title->setStyleSheet(QStringLiteral("font-size: 18px; font-weight: bold;"));
+    m_comboForecastHorizon = new QComboBox(m_pageForecast);
+    m_comboForecastHorizon->addItem(QStringLiteral("未来 1 小时"), QStringLiteral("1h"));
+    m_comboForecastHorizon->addItem(QStringLiteral("未来 6 小时"), QStringLiteral("6h"));
+    m_comboForecastHorizon->addItem(QStringLiteral("未来 24 小时"), QStringLiteral("24h"));
+    auto *btnRefresh = new QPushButton(QStringLiteral("刷新预测"), m_pageForecast);
+    markBtn(btnRefresh, QStringLiteral("primary"));
+    toolbar->addWidget(title);
+    toolbar->addStretch();
+    toolbar->addWidget(new QLabel(QStringLiteral("预测窗口："), m_pageForecast));
+    toolbar->addWidget(m_comboForecastHorizon);
+    toolbar->addWidget(btnRefresh);
+
+    m_tableForecast = new QTableWidget(0, 8, m_pageForecast);
+    m_tableForecast->setHorizontalHeaderLabels({
+        QStringLiteral("电站"), QStringLiteral("目标时段"), QStringLiteral("预测负荷(kWh)"),
+        QStringLiteral("预测空闲桩"), QStringLiteral("预测充电时长(分)"),
+        QStringLiteral("高峰小时"), QStringLiteral("空闲率预警"), QStringLiteral("更新时间"),
+    });
+    configureTable(m_tableForecast, {0}, {1, 2, 3, 4, 5, 6, 7});
+    m_tableForecast->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_tableForecast->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    pageLay->addLayout(toolbar);
+    pageLay->addWidget(m_tableForecast);
+    ui->stackedWidget->addWidget(m_pageForecast);
+    const int forecastPageIndex = ui->stackedWidget->indexOf(m_pageForecast);
+
+    connect(m_btnForecast, &QPushButton::clicked, this, [=]() {
+        resetAllBtnSelect();
+        m_btnForecast->setProperty(QStringLiteral("selected"), true);
+        refreshBtnStyle(m_btnForecast);
+        ui->stackedWidget->setCurrentIndex(forecastPageIndex);
+        reloadForecastList();
+    });
+    connect(btnRefresh, &QPushButton::clicked, this, &MainWindow::reloadForecastList);
+    connect(m_comboForecastHorizon, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { reloadForecastList(); });
+}
+
+void MainWindow::reloadForecastList()
+{
+    if (!m_tableForecast || !m_comboForecastHorizon) {
+        return;
+    }
+    if (m_stationItems.isEmpty()) {
+        const QJsonObject stResp = m_api->call(QStringLiteral("station.admin.list"));
+        if (stResp.value(QStringLiteral("ok")).toBool()) {
+            m_stationItems = stResp.value(QStringLiteral("data")).toObject()
+                                 .value(QStringLiteral("items")).toArray();
+        }
+    }
+    const QString horizon = m_comboForecastHorizon->currentData().toString();
+    const QJsonObject loadResp = m_api->call(
+        QStringLiteral("forecast.list"), QJsonObject{{QStringLiteral("horizon"), horizon}});
+    const QJsonObject timeResp = m_api->call(
+        QStringLiteral("timeforecast.list"), QJsonObject{{QStringLiteral("horizon"), horizon}});
+
+    if (!loadResp.value(QStringLiteral("ok")).toBool()) {
+        QMessageBox::warning(this, QStringLiteral("错误"),
+                             loadResp.value(QStringLiteral("error")).toObject()
+                                 .value(QStringLiteral("message")).toString(
+                                     QStringLiteral("获取负荷预测失败")));
+        return;
+    }
+
+    QHash<int, QJsonObject> timeByStation;
+    if (timeResp.value(QStringLiteral("ok")).toBool()) {
+        for (const QJsonValue &v : timeResp.value(QStringLiteral("data")).toObject()
+                                       .value(QStringLiteral("items")).toArray()) {
+            const QJsonObject row = v.toObject();
+            timeByStation.insert(row.value(QStringLiteral("station_id")).toInt(), row);
+        }
+    }
+
+    m_tableForecast->setRowCount(0);
+    const QJsonArray loadItems = loadResp.value(QStringLiteral("data")).toObject()
+                                     .value(QStringLiteral("items")).toArray();
+    for (const QJsonValue &v : loadItems) {
+        const QJsonObject loadRow = v.toObject();
+        const int sid = loadRow.value(QStringLiteral("station_id")).toInt();
+        addForecastRow(loadRow, timeByStation.value(sid));
+    }
+}
+
+void MainWindow::openDashboardInBrowser()
+{
+    const QUrl url(dashboardUrl());
+    if (!QDesktopServices::openUrl(url)) {
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("无法打开浏览器，请手动访问：%1").arg(url.toString()));
+        return;
+    }
+    if (m_labDashboardHint) {
+        m_labDashboardHint->setText(
+            QStringLiteral("已在系统浏览器打开：%1").arg(url.toString()));
+    }
+}
+
+void MainWindow::reloadDashboardView()
+{
+    const QUrl url(dashboardUrl());
+#ifdef CHARGE_USE_WEBENGINE
+    if (m_webDashboard) {
+        m_webDashboard->load(url);
+        if (m_labDashboardHint) {
+            m_labDashboardHint->setText(
+                QStringLiteral("内嵌加载：%1（需先运行 python dashboard/app.py）").arg(url.toString()));
+        }
+        return;
+    }
+#endif
+    if (m_labDashboardHint) {
+        m_labDashboardHint->setText(
+            QStringLiteral("未安装 Qt WebEngine，请使用「浏览器打开」。地址：%1").arg(url.toString()));
+    }
+}
+
+void MainWindow::setupDashboardPage()
+{
+    m_btnDashboard = new QPushButton(QStringLiteral("数据大屏"), ui->sideBarWidget);
+    m_btnDashboard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_btnDashboard->setCursor(Qt::PointingHandCursor);
+    const int insertIdx = ui->verticalLayout->indexOf(m_btnForecast) + 1;
+    ui->verticalLayout->insertWidget(insertIdx, m_btnDashboard);
+
+    m_pageDashboard = new QWidget;
+    auto *pageLay = new QVBoxLayout(m_pageDashboard);
+    pageLay->setContentsMargins(0, 0, 0, 0);
+    pageLay->setSpacing(0);
+
+    auto *toolbar = new QWidget(m_pageDashboard);
+    toolbar->setObjectName(QStringLiteral("widget_top_bar"));
+    toolbar->setAttribute(Qt::WA_StyledBackground, true);
+    auto *toolbarLay = new QHBoxLayout(toolbar);
+    toolbarLay->setContentsMargins(14, 10, 14, 10);
+    auto *title = new QLabel(QStringLiteral("机器学习智能分析大屏"), toolbar);
+    title->setStyleSheet(QStringLiteral("font-size: 18px; font-weight: bold;"));
+    auto *btnRefresh = new QPushButton(QStringLiteral("刷新"), toolbar);
+    auto *btnBrowser = new QPushButton(QStringLiteral("浏览器打开"), toolbar);
+    styleActionBtn(btnRefresh, "primary");
+    styleActionBtn(btnBrowser, "primary");
+    m_labDashboardHint = new QLabel(toolbar);
+    m_labDashboardHint->setStyleSheet(QStringLiteral("color: #5a6780;"));
+    m_labDashboardHint->setWordWrap(true);
+    toolbarLay->addWidget(title);
+    toolbarLay->addStretch();
+    toolbarLay->addWidget(m_labDashboardHint, 1);
+    toolbarLay->addWidget(btnRefresh);
+    toolbarLay->addWidget(btnBrowser);
+    pageLay->addWidget(toolbar);
+
+#ifdef CHARGE_USE_WEBENGINE
+    m_webDashboard = new QWebEngineView(m_pageDashboard);
+    m_webDashboard->setUrl(QUrl(dashboardUrl()));
+    pageLay->addWidget(m_webDashboard, 1);
+#else
+    auto *fallback = new QWidget(m_pageDashboard);
+    fallback->setAttribute(Qt::WA_StyledBackground, true);
+    auto *fallbackLay = new QVBoxLayout(fallback);
+    fallbackLay->setContentsMargins(24, 24, 24, 24);
+    auto *fallbackTitle = new QLabel(QStringLiteral("可视化大屏"), fallback);
+    fallbackTitle->setStyleSheet(QStringLiteral("font-size: 20px; font-weight: bold;"));
+    auto *fallbackText = new QLabel(
+        QStringLiteral("当前环境未安装 Qt WebEngine，无法在管理端内嵌展示。\n"
+                         "请先启动：python dashboard/app.py\n"
+                         "再点击上方「浏览器打开」访问大屏。"),
+        fallback);
+    fallbackText->setWordWrap(true);
+    fallbackLay->addWidget(fallbackTitle);
+    fallbackLay->addWidget(fallbackText);
+    fallbackLay->addStretch();
+    pageLay->addWidget(fallback, 1);
+#endif
+
+    ui->stackedWidget->addWidget(m_pageDashboard);
+    const int dashboardPageIndex = ui->stackedWidget->indexOf(m_pageDashboard);
+
+    connect(m_btnDashboard, &QPushButton::clicked, this, [=]() {
+        resetAllBtnSelect();
+        m_btnDashboard->setProperty(QStringLiteral("selected"), true);
+        refreshBtnStyle(m_btnDashboard);
+        ui->stackedWidget->setCurrentIndex(dashboardPageIndex);
+        reloadDashboardView();
+    });
+    connect(btnRefresh, &QPushButton::clicked, this, &MainWindow::reloadDashboardView);
+    connect(btnBrowser, &QPushButton::clicked, this, &MainWindow::openDashboardInBrowser);
+}
+
+void MainWindow::addForecastRow(const QJsonObject &loadRow, const QJsonObject &timeRow)
+{
+    if (!m_tableForecast) {
+        return;
+    }
+    const int row = m_tableForecast->rowCount();
+    m_tableForecast->insertRow(row);
+
+    auto mk = [](const QString &text) {
+        auto *item = new QTableWidgetItem(text);
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        return item;
+    };
+
+    const int predIdle = loadRow.value(QStringLiteral("predicted_idle_piles")).toInt();
+    int totalPiles = 0;
+    for (const QJsonValue &sv : m_stationItems) {
+        if (sv.toObject().value(QStringLiteral("id")).toInt()
+            == loadRow.value(QStringLiteral("station_id")).toInt()) {
+            totalPiles = sv.toObject().value(QStringLiteral("total_piles")).toInt();
+            break;
+        }
+    }
+    const double idleRate = totalPiles > 0 ? predIdle * 100.0 / totalPiles : 100.0;
+    QString warn = idleRate >= 30.0 ? QStringLiteral("正常") : QStringLiteral("⚠ 负荷偏高");
+    QString peakHour = QStringLiteral("-");
+    if (timeRow.contains(QStringLiteral("predicted_peak_hour"))) {
+        peakHour = QStringLiteral("%1:00").arg(timeRow.value(QStringLiteral("predicted_peak_hour")).toInt());
+    }
+
+    m_tableForecast->setItem(row, 0, mk(loadRow.value(QStringLiteral("station_name")).toString()));
+    m_tableForecast->setItem(row, 1, mk(loadRow.value(QStringLiteral("forecast_hour")).toString()));
+    m_tableForecast->setItem(row, 2, mk(QString::number(loadRow.value(QStringLiteral("predicted_load")).toDouble(), 'f', 1)));
+    m_tableForecast->setItem(row, 3, mk(QString::number(predIdle)));
+    m_tableForecast->setItem(row, 4, mk(timeRow.isEmpty()
+        ? QStringLiteral("-")
+        : QString::number(timeRow.value(QStringLiteral("predicted_avg_duration_min")).toDouble(), 'f', 0)));
+    m_tableForecast->setItem(row, 5, mk(peakHour));
+    auto *warnItem = mk(warn);
+    if (warn.startsWith(QStringLiteral("⚠"))) {
+        warnItem->setForeground(QBrush(QColor(QStringLiteral("#D93025"))));
+    }
+    m_tableForecast->setItem(row, 6, warnItem);
+    m_tableForecast->setItem(row, 7, mk(loadRow.value(QStringLiteral("created_at")).toString()));
 }
 

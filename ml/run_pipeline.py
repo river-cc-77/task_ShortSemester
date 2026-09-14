@@ -86,12 +86,15 @@ def main() -> int:
             try_run_collector()
 
     if not check_ads_ready():
-        if args.bootstrap_ads:
+        if args.bootstrap_ads or platform.system() != "Linux":
+            if platform.system() != "Linux":
+                print("\n>>> 非 Linux 环境，使用 bootstrap_ads.py 生成 ads_*（演示/开发）")
             run_py("bootstrap_ads.py")
         elif not try_run_collector():
             print("\n[!] ads_station_hourly 为空。Linux 验收环境请:")
             print("    cd collector && qmake6 collector.pro && make -j4 && ./ads-collector")
             print("    或一键: bash ml/run_pipeline.sh --generate 3000")
+            print("    或应急: python ml/run_pipeline.py --bootstrap-ads")
             return 1
 
     if not args.skip_export:

@@ -18,6 +18,9 @@ class QComboBox;
 #include "announcementeditdialog.h"
 #include "paginationutil.h"
 class ApiClient;
+#ifdef CHARGE_USE_WEBENGINE
+class QWebEngineView;
+#endif
 namespace Ui {
 class MainWindow;
 }
@@ -65,6 +68,12 @@ private slots:
 
     void reloadAnnouncementList();
     void addAnnouncementRow(const QJsonObject &obj);
+    void setupForecastPage();
+    void reloadForecastList();
+    void addForecastRow(const QJsonObject &loadRow, const QJsonObject &timeRow);
+    void setupDashboardPage();
+    void reloadDashboardView();
+    void openDashboardInBrowser();
     void onAddAnnouncementClicked();
     void onEditAnnouncementClicked(const QJsonObject &announcement);
     void onDeleteAnnouncementClicked(const QJsonObject &announcement);
@@ -93,6 +102,16 @@ private:
     QJsonArray m_logItems;
     QJsonArray m_announceItems;
     QMap<int, int> m_forecastMinIdle;
+    QPushButton *m_btnForecast = nullptr;
+    QWidget *m_pageForecast = nullptr;
+    QTableWidget *m_tableForecast = nullptr;
+    QComboBox *m_comboForecastHorizon = nullptr;
+    QPushButton *m_btnDashboard = nullptr;
+    QWidget *m_pageDashboard = nullptr;
+    QLabel *m_labDashboardHint = nullptr;
+#ifdef CHARGE_USE_WEBENGINE
+    QWebEngineView *m_webDashboard = nullptr;
+#endif
     ListPager m_userPager;
     ListPager m_pilePager;
     ListPager m_orderPager;

@@ -1,4 +1,11 @@
 QT += core gui widgets printsupport network
+
+# 已安装 Qt WebEngine 时在管理端内嵌 dashboard 大屏
+qtHaveModule(webenginewidgets) {
+    QT += webenginewidgets
+    DEFINES += CHARGE_USE_WEBENGINE
+}
+
 CONFIG += c++17
 CONFIG -= app_bundle
 INCLUDEPATH += ../client

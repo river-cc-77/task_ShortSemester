@@ -84,6 +84,8 @@ qmake6 charge-admin.pro && make -j4
 ./charge-admin
 ```
 
+侧边栏 **「数据大屏」** 可内嵌打开 dashboard（需已安装 Qt WebEngine 且 `python3 dashboard/app.py` 在运行）；也可点「浏览器打开」。
+
 ## 当前可用 API
 
 完整协议见 `docs/protocal.md`，架构见 `docs/architecture.md`。
@@ -164,13 +166,13 @@ qmake6 charge-admin.pro && make -j4
 
 运行前须重建库并跑 collector：`collector/README.md`
 
-### 待实现后补测（代码尚未完成）
+### 自动化（`tools/test_dashboard.py`）
 
-| 功能 | 预期测试 |
+| 类别 | 覆盖内容 |
 |------|----------|
-| `operation.log.list` | Admin 操作日志页列表 |
-| `forecast.list` / `event.push` | 第二阶段 ML 与推送 |
-| admin 操作日志页 UI | 接 operation.log.list |
+| Dashboard API | KPI、营收趋势、桩状态、高峰曲线、排行、ML 预测 |
+
+运行前：`pip install -r dashboard/requirements.txt && python dashboard/app.py`
 
 ### 手工 / UI 联调
 
@@ -201,3 +203,9 @@ qmake6 charge-admin.pro && make -j4
 
 **GitHub连接被拒绝**
 →没开梯子/尝试切换梯子节点/直接登录GitHub下载zip文件
+
+**大屏 KPI 为空 / 无营收趋势**
+→ 先跑 collector 或应急脚本：`python3 ml/bootstrap_ads.py`，再 `python3 ml/predict_local.py`
+
+**Windows 开发环境无 collector**
+→ `python ml/run_pipeline.py --generate 3000`（自动 bootstrap_ads + 预测）

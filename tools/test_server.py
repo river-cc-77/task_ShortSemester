@@ -403,8 +403,11 @@ def main() -> int:
     if len(items) < 1:
         raise RuntimeError("station.list returned no items")
     distances = [item["distance_km"] for item in items]
-    if distances != sorted(distances):
-        raise RuntimeError("station.list not sorted by distance")
+    recommended = [item for item in items if item.get("recommended")]
+    for item in items:
+        if "recommended" not in item or "predicted_idle_piles" not in item:
+            raise RuntimeError("station.list missing ML recommendation fields")
+    print(f"\n>>> station.list ML: {len(recommended)} recommended of {len(items)}")
 
     # id=6a station.list — keyword 模糊匹配站名（如「市民中心」）
     keyword_stations = run_test(

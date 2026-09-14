@@ -4,6 +4,7 @@
 #include "../dbmanager.h"
 #include "../protocol.h"
 
+#include <QHash>
 #include <QJsonArray>
 #include <QtMath>
 #include <algorithm>
@@ -102,20 +103,60 @@ QJsonObject StationHandler::list(const QString &id, const QString &token, const 
     QJsonArray rows = DbManager::instance().fetchStations(keyword);
     QList<QJsonObject> items;
 
+    // 1h 负荷预测：用于推荐标记（协议 4.2）
+    QJsonArray forecastRows = DbManager::instance().fetchForecasts(QStringLiteral("1h"), 0);
+    QHash<int, QJsonObject> forecastByStation;
+    QList<double> predictedLoads;
+    for (const QJsonValue &fv : forecastRows) {
+        const QJsonObject fo = fv.toObject();
+        const int sid = fo.value(QStringLiteral("station_id")).toInt();
+        forecastByStation.insert(sid, fo);
+        predictedLoads.append(fo.value(QStringLiteral("predicted_load")).toDouble());
+    }
+    std::sort(predictedLoads.begin(), predictedLoads.end());
+    const double loadMedian = predictedLoads.isEmpty()
+                                  ? 0.0
+                                  : predictedLoads[predictedLoads.size() / 2];
+
     for (const QJsonValue &value : rows) {
         QJsonObject row = value.toObject();
         const double stationLat = row.value("lat").toDouble();
         const double stationLng = row.value("lng").toDouble();
+        const int stationId = row.value("id").toInt();
         const int totalPiles = row.value("total_piles").toInt();
         const int idlePiles = row.value("idle_piles").toInt();
 
         row["distance_km"] = round1(haversineKm(lat, lng, stationLat, stationLng));
         row["online_rate"] = onlineRate(totalPiles, idlePiles);
-        row["recommended"] = false;
+
+        int predIdle = idlePiles;
+        double predLoad = 0.0;
+        if (forecastByStation.contains(stationId)) {
+            const QJsonObject fo = forecastByStation.value(stationId);
+            predIdle = fo.value(QStringLiteral("predicted_idle_piles")).toInt(idlePiles);
+            predLoad = fo.value(QStringLiteral("predicted_load")).toDouble();
+            row["predicted_idle_piles"] = predIdle;
+            row["predicted_load"] = predLoad;
+            row["forecast_hour"] = fo.value(QStringLiteral("forecast_hour")).toString();
+        } else {
+            row["predicted_idle_piles"] = predIdle;
+            row["predicted_load"] = predLoad;
+        }
+
+        const double predIdleRate = totalPiles > 0 ? predIdle / static_cast<double>(totalPiles) : 0.0;
+        const bool lowCongestion = predIdleRate >= 0.5;
+        const bool belowMedianLoad = predictedLoads.isEmpty() || predLoad <= loadMedian;
+        row["recommended"] = lowCongestion && belowMedianLoad;
+
         items.append(row);
     }
 
     std::sort(items.begin(), items.end(), [](const QJsonObject &a, const QJsonObject &b) {
+        const bool ra = a.value(QStringLiteral("recommended")).toBool();
+        const bool rb = b.value(QStringLiteral("recommended")).toBool();
+        if (ra != rb) {
+            return ra > rb;
+        }
         return a.value("distance_km").toDouble() < b.value("distance_km").toDouble();
     });
 

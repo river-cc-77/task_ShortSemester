@@ -67,7 +67,7 @@ cd .. && bash ml/run_pipeline.sh   # 导出 + predict_local
 | `spark/forecast.sql` | Spark SQL 预测（仅 SQL，不用 MLlib） |
 | `verify.py` | 离线校验预测表行数与字段 |
 
-`bootstrap_ads.py` 仅作**无法编译 collector 时的应急**，**验收/demo 请一律用 ads-collector**。
+`bootstrap_ads.py` 仅作**无法编译 collector 时的应急**（产出 `ads_station_*` + `ads_daily_stats`），**验收/demo 请一律用 ads-collector**。Windows 开发可 `python ml/run_pipeline.py --generate 3000` 自动走 bootstrap。
 
 ## 算法（加权移动平均 WMA）
 
@@ -99,10 +99,20 @@ python3 ml/sync_to_sqlite.py
 
 无 Hadoop 集群时，用 `predict_local.py` 即可，算法与 `spark/forecast.sql` 一致。
 
+## 业务展示
+
+| 位置 | 功能 |
+|------|------|
+| **用户端** `charge-client` | 充电站列表 ⭐推荐、详情页预测负荷/时长 |
+| **管理端** `charge-admin` | 电站页 ⚠ 负荷预警、侧边栏「智能预测」页 |
+| **大屏** `dashboard/app.py` | ECharts 展示 KPI、预测、高峰曲线 |
+
 ## 业务接口
 
 - `forecast.list` — 读 `load_forecast`（管理端负荷预警 ⚠）
 - `timeforecast.list` — 读 `time_forecast`（充电时间预测）
+- `station.list` — 含 `recommended` / `predicted_*` 智能推荐字段
+- `station.detail` — 含 `forecast` 预测摘要
 
 ```json
 { "cmd": "forecast.list", "data": { "horizon": "1h", "station_id": 1 } }

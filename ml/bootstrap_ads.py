@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""从 charge_order 快速生成 ads_station_hourly / ads_station_daily（应急脚本）。
+"""从 charge_order 快速生成 ads_* 分析表（应急脚本）。
+
+产出: ads_station_hourly、ads_station_daily、ads_daily_stats（大屏 KPI / 趋势）。
 
 本项目验收环境为 Linux + collector/ads-collector，请优先使用 collector。
 本脚本仅在无法编译/运行 ads-collector 时临时使用，口径简于正式 collector。
@@ -51,6 +53,9 @@ def main() -> int:
 
     cur.execute("DELETE FROM ads_station_hourly")
     cur.execute("DELETE FROM ads_station_daily")
+    cur.execute("DELETE FROM ads_daily_stats")
+
+    pile_total = cur.execute("SELECT COUNT(*) FROM pile").fetchone()[0]
 
     # 全量网格 0 初始化
     day = start_day
@@ -138,6 +143,9 @@ def main() -> int:
             ),
         )
 
+    platform_day: dict[str, dict] = {}
+    platform_hour_orders: dict[str, dict[int, int]] = {}
+
     for (station_id, ds), d in daily_acc.items():
         peak = max(d["hour_orders"], key=d["hour_orders"].get) if d["hour_orders"] else None
         avg_session = d["duration"] / d["orders"] if d["orders"] else 0
@@ -168,11 +176,118 @@ def main() -> int:
             ),
         )
 
+        p = platform_day.setdefault(
+            ds,
+            {"orders": 0, "revenue": 0.0, "kwh": 0.0, "duration": 0.0, "users": set()},
+        )
+        p["orders"] += d["orders"]
+        p["revenue"] += d["revenue"]
+        p["kwh"] += d["kwh"]
+        p["duration"] += d["duration"]
+        for hour, cnt in d["hour_orders"].items():
+            platform_hour_orders.setdefault(ds, {})
+            platform_hour_orders[ds][hour] = platform_hour_orders[ds].get(hour, 0) + cnt
+
+    for (station_id, ds, hour), h in hourly_acc.items():
+        p = platform_day.setdefault(
+            ds,
+            {"orders": 0, "revenue": 0.0, "kwh": 0.0, "duration": 0.0, "users": set()},
+        )
+        p["users"].update(h["users"])
+
+    pending_by_day = {
+        row[0]: row[1]
+        for row in cur.execute(
+            """
+            SELECT substr(created_at, 1, 10) AS d, COUNT(*)
+            FROM charge_order
+            WHERE status='待支付'
+            GROUP BY d
+            """
+        )
+    }
+    new_users_by_day = {
+        row[0]: row[1]
+        for row in cur.execute(
+            """
+            SELECT substr(created_at, 1, 10) AS d, COUNT(*)
+            FROM user
+            GROUP BY d
+            """
+        )
+    }
+
+    day = start_day
+    while day <= end_day:
+        ds = day.isoformat()
+        p = platform_day.get(
+            ds,
+            {"orders": 0, "revenue": 0.0, "kwh": 0.0, "duration": 0.0, "users": set()},
+        )
+        order_count = p["orders"]
+        revenue = p["revenue"]
+        kwh = p["kwh"]
+        active_users = len(p["users"])
+        pending = pending_by_day.get(ds, 0)
+        new_users = new_users_by_day.get(ds, 0)
+        total_users = cur.execute(
+            "SELECT COUNT(*) FROM user WHERE substr(created_at, 1, 10) <= ?",
+            (ds,),
+        ).fetchone()[0]
+        occ_min = p["duration"]
+        completion = (
+            order_count / (order_count + pending) if (order_count + pending) > 0 else 0.0
+        )
+        active_ratio = active_users / total_users if total_users > 0 else 0.0
+        per_user_orders = order_count / active_users if active_users > 0 else 0.0
+        per_user_kwh = kwh / active_users if active_users > 0 else 0.0
+        avg_session = occ_min / order_count if order_count > 0 else 0.0
+        avg_kwh = kwh / order_count if order_count > 0 else 0.0
+        utilization = min(occ_min / (pile_total * 1440.0), 1.0) if pile_total > 0 else 0.0
+        hour_orders = platform_hour_orders.get(ds, {})
+        peak_hour = max(hour_orders, key=hour_orders.get) if hour_orders else None
+
+        cur.execute(
+            """
+            INSERT INTO ads_daily_stats
+                (stat_date, total_revenue, total_kwh, order_count, active_user_count,
+                 new_user_count, total_users, pending_cnt, completion_rate, active_ratio,
+                 per_user_orders, per_user_kwh, avg_session_min, avg_kwh_order,
+                 occ_min, utilization, busy_ratio, fault_rate, peak_hour, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?,
+                    datetime('now','localtime'))
+            """,
+            (
+                ds,
+                round(revenue, 2),
+                round(kwh, 2),
+                order_count,
+                active_users,
+                new_users,
+                total_users,
+                pending,
+                round(completion, 4),
+                round(active_ratio, 4),
+                round(per_user_orders, 4),
+                round(per_user_kwh, 4),
+                round(avg_session, 2),
+                round(avg_kwh, 4),
+                round(occ_min, 2),
+                round(utilization, 4),
+                peak_hour,
+            ),
+        )
+        day += timedelta(days=1)
+
     conn.commit()
     hourly_cnt = cur.execute("SELECT COUNT(*) FROM ads_station_hourly").fetchone()[0]
     daily_cnt = cur.execute("SELECT COUNT(*) FROM ads_station_daily").fetchone()[0]
+    platform_cnt = cur.execute("SELECT COUNT(*) FROM ads_daily_stats").fetchone()[0]
     conn.close()
-    print(f"bootstrap_ads 完成: ads_station_hourly={hourly_cnt}, ads_station_daily={daily_cnt}")
+    print(
+        f"bootstrap_ads 完成: ads_station_hourly={hourly_cnt}, "
+        f"ads_station_daily={daily_cnt}, ads_daily_stats={platform_cnt}"
+    )
     print(f"数据库: {resolve_db_path()}")
     return 0
 

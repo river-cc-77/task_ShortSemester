@@ -347,19 +347,36 @@ void MainWindow::loadStations()
         return;
     }
 
+    int recommendedCount = 0;
     for (const QJsonValue &value : items) {
         const QJsonObject item = value.toObject();
-        const QString line = QStringLiteral("%1 | %2元/度 | 空闲 %3/%4 | %5 km")
+        const bool recommended = item.value(QStringLiteral("recommended")).toBool();
+        if (recommended) {
+            ++recommendedCount;
+        }
+        const int predIdle = item.value(QStringLiteral("predicted_idle_piles")).toInt(
+            item.value(QStringLiteral("idle_piles")).toInt());
+        const QString prefix = recommended ? QStringLiteral("⭐推荐 ") : QString();
+        const QString line = QStringLiteral("%1%2 | %3元/度 | 空闲 %4/%5 | 预测空闲 %6 | %7 km")
+                                 .arg(prefix)
                                  .arg(item.value(QStringLiteral("name")).toString())
                                  .arg(item.value(QStringLiteral("price")).toDouble(), 0, 'f', 2)
                                  .arg(item.value(QStringLiteral("idle_piles")).toInt())
                                  .arg(item.value(QStringLiteral("total_piles")).toInt())
+                                 .arg(predIdle)
                                  .arg(item.value(QStringLiteral("distance_km")).toDouble(), 0, 'f', 1);
         auto *listItem = new QListWidgetItem(line);
         listItem->setData(Qt::UserRole, item.value("id").toInt());
+        if (recommended) {
+            listItem->setForeground(QColor(QStringLiteral("#0B8043")));
+            listItem->setToolTip(QStringLiteral("智能推荐：预测空闲率高且负荷低于中位数，排队风险较低"));
+        }
         m_stationList->addItem(listItem);
     }
-    m_statusLabel->setText(QStringLiteral("共 %1 个充电站（按距离排序）").arg(items.size()));
+    m_statusLabel->setText(
+        QStringLiteral("共 %1 个充电站，其中 %2 个智能推荐（推荐优先、同组按距离）")
+            .arg(items.size())
+            .arg(recommendedCount));
 }
 
 void MainWindow::onStationItemClicked(QListWidgetItem *item)
@@ -427,12 +444,31 @@ void MainWindow::showStationDetail(int stationId)
     const QJsonObject detail = resp.value(QStringLiteral("data")).toObject();
     const QJsonObject station = detail.value(QStringLiteral("station")).toObject();
     const QJsonArray piles = detail.value(QStringLiteral("piles")).toArray();
+    const QJsonObject forecast = detail.value(QStringLiteral("forecast")).toObject();
+    const QJsonObject load1h = forecast.value(QStringLiteral("load_1h")).toObject();
+    const QJsonObject time1h = forecast.value(QStringLiteral("time_1h")).toObject();
 
-    stationLabel->setText(QStringLiteral("【%1】地址：%2 | 电价：%3元/度 | 共%4个电桩")
+    QString forecastText;
+    if (!load1h.isEmpty()) {
+        forecastText = QStringLiteral(" | 预测1h负荷 %1kWh，预测空闲桩 %2")
+                           .arg(load1h.value(QStringLiteral("predicted_load")).toDouble(), 0, 'f', 1)
+                           .arg(load1h.value(QStringLiteral("predicted_idle_piles")).toInt());
+    }
+    if (!time1h.isEmpty()) {
+        forecastText += QStringLiteral("，预计充电 %1 分钟")
+                            .arg(time1h.value(QStringLiteral("predicted_avg_duration_min")).toDouble(), 0, 'f', 0);
+        if (time1h.contains(QStringLiteral("predicted_peak_hour"))) {
+            forecastText += QStringLiteral("，高峰时段 %1:00")
+                                .arg(time1h.value(QStringLiteral("predicted_peak_hour")).toInt());
+        }
+    }
+
+    stationLabel->setText(QStringLiteral("【%1】地址：%2 | 电价：%3元/度 | 共%4个电桩%5")
                              .arg(station.value(QStringLiteral("name")).toString())
                              .arg(station.value(QStringLiteral("address")).toString())
                              .arg(station.value(QStringLiteral("price")).toDouble(), 0, 'f', 2)
-                             .arg(piles.size()));
+                             .arg(piles.size())
+                             .arg(forecastText));
 
     const double destLat = station.value(QStringLiteral("lat")).toDouble();
     const double destLng = station.value(QStringLiteral("lng")).toDouble();

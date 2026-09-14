@@ -326,6 +326,10 @@
 
 **推荐规则（P2）：** `predicted_idle_piles / total_piles >= 0.5` 且负荷预测低于站点中位数 → `recommended: true`。
 
+**排序：** 推荐站优先，同组内仍按 `distance_km` 升序。
+
+**扩展字段（便于客户端展示）：** `predicted_idle_piles`、`predicted_load`、`forecast_hour`。
+
 ---
 
 ### 4.3 `station.detail`
@@ -356,11 +360,16 @@
       "status": "故障",
       "can_reserve": false
     }
-  ]
+  ],
+  "forecast": {
+    "load_1h": { "predicted_load": 85.0, "predicted_idle_piles": 4, "forecast_hour": "2026-08-28 15:00" },
+    "time_1h": { "predicted_avg_duration_min": 42.0, "predicted_peak_hour": 11 }
+  }
 }
 ```
 
 - `can_reserve`：`status == 闲置` 时为 true
+- `forecast`：ML 预测摘要（1h/6h/24h 负荷与时间，无数据时字段省略）
 
 ---
 

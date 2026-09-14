@@ -86,11 +86,11 @@ task_ShortSemester/
 │   ├── authmanager.*        # token 会话
 │   ├── dbmanager.*          # QSQLITE 封装
 │   └── handlers/            # 各 cmd 业务实现
-├── client/                  # 用户端（待开发）
-├── admin/                   # 管理端（待开发）
+├── client/                  # 用户端 Qt6
+├── admin/                   # 管理端 Qt6（含智能预测页）
 ├── collector/               # 大屏数据采集聚合（Qt6/C++ 定时任务）
-├── dashboard/               # Web 大屏（待开发）
-├── ml/                      # 预测脚本（待开发）
+├── dashboard/               # Web 大屏 Flask + ECharts
+├── ml/                      # 预测脚本 + 流水线
 ├── tools/
 │   └── test_server.py       # P0 协议测试客户端
 └── TaskArrangement.xlsx     # 需求进度 / 分工表
@@ -305,7 +305,10 @@ qmake6 charge-server.pro && make -j4
 ./charge-server
 
 # 5. 启动用户端 / 管理端（连接 127.0.0.1:9000）
-# 6. 可选：dashboard
+
+# 6. 可视化大屏（可选）
+pip install -r dashboard/requirements.txt
+python3 dashboard/app.py    # http://127.0.0.1:5000
 ```
 
 ### 8.3 演示账号
