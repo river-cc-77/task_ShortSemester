@@ -28,7 +28,7 @@ npm run build
 ## 技术
 
 - Vue 3 + Vite 6
-- `@kjgl77/datav-vue3` — BorderBox、Decoration 等 DataV 组件
-- ECharts + vue-echarts — 折线、柱、饼、热力、雷达、仪表盘、散点等
+- ECharts + vue-echarts — 折线、柱、饼、雷达、仪表盘、散点等
+- 静态 CSS 边框（无动画闪烁）
 
 详见 [docs/phase2.md](../docs/phase2.md)
