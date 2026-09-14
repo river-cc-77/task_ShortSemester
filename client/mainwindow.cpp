@@ -1340,12 +1340,14 @@ void MainWindow::onFavoriteList()
 
     loadFavorites();
 
-    // 点收藏项 → 关掉收藏窗，回到「电站选择」并打开该站详情。
-    // 不能在这里直接开详情弹窗：收藏窗还在自己的 exec() 里，再叠一层模态（父窗口是
+    // 双击收藏项 → 关掉收藏窗，回到「电站选择」并打开该站详情。
+    // 用双击而不是单击：单击要留给「选中 → 取消收藏选中项」这条路径，否则第一次
+    // 点击就把窗口关了，「取消收藏」按钮永远点不到。列表默认单击即选中，无需额外接线。
+    // 也不能在这里直接开详情弹窗：收藏窗还在自己的 exec() 里，再叠一层模态（父窗口是
     // MainWindow）层级会乱。所以照搬「导航」那套：先记下意图并 accept()，等 exec() 返回后再做。
     bool pendingOpen = false;
     int pendingStationId = 0;
-    connect(listWidget, &QListWidget::itemClicked, &dlg, [&](QListWidgetItem *item) {
+    connect(listWidget, &QListWidget::itemDoubleClicked, &dlg, [&](QListWidgetItem *item) {
         if (!item || item->data(Qt::UserRole).isNull()) {
             return;   // 「暂无收藏的充电站」是占位行，没有 station id
         }
