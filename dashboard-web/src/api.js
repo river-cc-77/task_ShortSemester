@@ -11,7 +11,6 @@ const ENDPOINTS = [
   'station_util',
   'region_stats',
   'station_hour_matrix',
-  'ml_evaluation',
 ]
 
 export async function fetchAll() {

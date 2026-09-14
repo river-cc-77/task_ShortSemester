@@ -112,29 +112,6 @@ body {
   height: 320px;
 }
 
-.eval-row {
-  display: flex;
-  gap: 24px;
-  padding: 12px 16px;
-  flex-wrap: wrap;
-}
-
-.eval-item {
-  min-width: 140px;
-}
-
-.eval-item .label {
-  color: #64748b;
-  font-size: 12px;
-}
-
-.eval-item .value {
-  font-size: 22px;
-  font-weight: 600;
-  color: #22d3ee;
-  margin-top: 4px;
-}
-
 @media (max-width: 1200px) {
   .grid {
     grid-template-columns: 1fr 1fr;

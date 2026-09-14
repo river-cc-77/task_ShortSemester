@@ -299,13 +299,6 @@ const gaugeOpt = computed(() => {
   }
 })
 
-const evalLoad = computed(() => data.value?.ml_evaluation?.load_kwh || {})
-const evalDuration = computed(() => data.value?.ml_evaluation?.duration_min || {})
-
-function fmtMetric(v) {
-  return v == null ? '—' : round2(v).toFixed(2)
-}
-
 async function refresh() {
   try {
     data.value = await fetchAll()
@@ -402,36 +395,6 @@ onUnmounted(() => clearInterval(timer))
         <div class="panel-title">充电时长与高峰（柱+散点）</div>
         <VChart class="chart" :option="timeOpt" autoresize />
       </dv-border-box-12>
-
-      <dv-border-box-8 class="panel full">
-        <div class="panel-title">WMA 模型离线评估（MAE / RMSE / MAPE）</div>
-        <div class="eval-row">
-          <div class="eval-item">
-            <div class="label">负荷 MAE (kWh)</div>
-            <div class="value">{{ fmtMetric(evalLoad.mae) }}</div>
-          </div>
-          <div class="eval-item">
-            <div class="label">负荷 RMSE</div>
-            <div class="value">{{ fmtMetric(evalLoad.rmse) }}</div>
-          </div>
-          <div class="eval-item">
-            <div class="label">负荷 MAPE (%)</div>
-            <div class="value">{{ fmtMetric(evalLoad.mape_pct) }}</div>
-          </div>
-          <div class="eval-item">
-            <div class="label">时长 MAE (min)</div>
-            <div class="value">{{ fmtMetric(evalDuration.mae) }}</div>
-          </div>
-          <div class="eval-item">
-            <div class="label">时长 RMSE</div>
-            <div class="value">{{ fmtMetric(evalDuration.rmse) }}</div>
-          </div>
-          <div class="eval-item">
-            <div class="label">时长 MAPE (%)</div>
-            <div class="value">{{ fmtMetric(evalDuration.mape_pct) }}</div>
-          </div>
-        </div>
-      </dv-border-box-8>
     </section>
   </div>
 </template>
