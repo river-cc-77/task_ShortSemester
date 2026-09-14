@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,7 @@ from common import (
     HORIZONS,
     OUTPUT_DIR,
     connect_db,
+    ensure_schema,
     forecast_target,
     format_hour,
     now_local,
@@ -61,17 +62,25 @@ def wma_same_hour(
     positive_only: bool = False,
     ref_date: date | None = None,
 ) -> float:
-    """同 hour 加权移动平均：w_i = 1 / (days_ago + 1)。"""
+    """同 hour 加权移动平均：w_i = 1 / (days_ago + 1)。
+
+    窗口为 [ref_date - HISTORY_DAYS, ref_date)，**不含 ref_date 当天**——
+    当天可能只过了一半，甚至只有 collector/bootstrap 物化出来的全 0 占位行，
+    而它的权重最大（days_ago=0 -> w=1.0），会把预测系统性拉低约 37%。
+    口径与 evaluate.wma_backtest 保持一致。
+    """
     ref_date = ref_date or date.today()
+    window_start = (ref_date - timedelta(days=HISTORY_DAYS)).isoformat()
     rows = conn.execute(
         f"""
         SELECT stat_date, {column} AS v
         FROM ads_station_hourly
         WHERE station_id = ?
           AND stat_hour = ?
-          AND stat_date >= date('now', '-{HISTORY_DAYS} day')
+          AND stat_date < ?
+          AND stat_date >= ?
         """,
-        (station_id, stat_hour),
+        (station_id, stat_hour, ref_date.isoformat(), window_start),
     ).fetchall()
 
     weighted_sum = 0.0
@@ -96,6 +105,11 @@ def wma_same_hour(
 
 
 def resolve_peak_hour(conn, station_id: int) -> int | None:
+    """高峰小时；无任何历史订单时返回 None（schema 约定：无历史为 NULL）。
+
+    注意第一分支的 `peak_hour IS NOT NULL` 天然跳过「当日无单」的全 0 行，
+    不要改成 MAX(stat_date)——那会命中占位行。
+    """
     row = conn.execute(
         """
         SELECT peak_hour
@@ -109,12 +123,15 @@ def resolve_peak_hour(conn, station_id: int) -> int | None:
     if row and row["peak_hour"] is not None:
         return int(row["peak_hour"])
 
+    # 网格里每站每天 24 行恒存在，故必须用 HAVING 排除全 0 占位，
+    # 否则 GROUP BY 一定返回一行，且按 stat_hour ASC 取到 0 -> 误报 00:00 为高峰。
     row = conn.execute(
         """
         SELECT stat_hour
         FROM ads_station_hourly
         WHERE station_id = ?
         GROUP BY stat_hour
+        HAVING SUM(orders) > 0
         ORDER BY AVG(orders) DESC, stat_hour ASC
         LIMIT 1
         """,
@@ -194,6 +211,7 @@ def run_predict(conn, now: datetime | None = None) -> tuple[list[dict[str, Any]]
 
 
 def write_sqlite(conn, load_rows, time_rows) -> None:
+    ensure_schema(conn)  # 旧库可能缺 time_forecast（见 common.ensure_schema）
     conn.execute("DELETE FROM load_forecast")
     conn.execute("DELETE FROM time_forecast")
 

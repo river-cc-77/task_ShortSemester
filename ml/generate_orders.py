@@ -63,7 +63,10 @@ def main() -> int:
     seq = len(existing)
 
     end_day = datetime.now().replace(hour=22, minute=0, second=0, microsecond=0)
-    start_day = end_day - timedelta(days=args.days)
+    # 历史日窗口为 [today-(days-1), today-1]，今天由下面的 today_quota 单独铺。
+    # 原写法 days 天再取 randint(0, days-1)，最早一天落到 today-days，
+    # 正好在 collector/网格窗口（today-(windowDays-1)）之外，那 1/30 的单白造。
+    start_day = end_day - timedelta(days=args.days - 1)
 
     def write_order(start: datetime) -> None:
         nonlocal seq, inserted
@@ -73,6 +76,12 @@ def main() -> int:
             price = stations.get(station_id, 1.2)
         duration_min = random.randint(20, 90)
         end = start + timedelta(minutes=duration_min)
+        now = datetime.now()
+        if end > now:
+            # 只保证 start 不在未来还不够：end = start + 20~90min 仍可能越过 now，
+            # 会变成"已完成但尚未发生"的占用，虚高 occ_min / utilization
+            start = now - timedelta(minutes=duration_min)
+            end = now
         kwh = round(float(power_kw) * duration_min / 60.0, 2)
         amount = round(kwh * float(price), 2)
 
@@ -109,7 +118,7 @@ def main() -> int:
         write_order(start)
 
     for _ in range(args.count):
-        day_offset = random.randint(0, max(args.days - 1, 0))
+        day_offset = random.randint(0, max(args.days - 2, 0))  # 只铺历史日，今天见 today_quota
         hour = random.randint(7, 22)
         minute = random.randint(0, 59)
         start = (start_day + timedelta(days=day_offset)).replace(hour=hour, minute=minute)

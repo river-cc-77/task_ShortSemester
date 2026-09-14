@@ -5,6 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>东软充电桩 — 智能分析大屏</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <script>
+    // 本页是 Vue 构建产物不存在时的兜底页，ECharts 走 CDN，仓库内没有本地副本。
+    // 离线环境下 CDN 静默失败，8 张图全白且没有任何提示，极易被误判成"没有数据"。
+    // 这里兜一个 stub + 可见横幅：KPI 卡片等 DOM 部分照常渲染，只有图表区空着。
+    if (!window.echarts) {
+      window.echarts = {
+        init: function () { return { setOption: function () {}, resize: function () {} }; }
+      };
+      document.addEventListener('DOMContentLoaded', function () {
+        var tip = document.createElement('div');
+        tip.style.cssText = 'margin:16px 28px;padding:14px 18px;border:1px solid #7c2d12;'
+          + 'background:#2a1207;color:#fdba74;border-radius:8px;font-size:14px;line-height:1.8';
+        tip.innerHTML = '<b>ECharts 未加载</b>：本页图表依赖 CDN（echarts@5.5.1），'
+          + '当前环境访问不了 cdn.jsdelivr.net，所以图表区是空白的（数据本身正常）。<br>'
+          + '离线部署请改用 Vue 版：<code>cd dashboard-web &amp;&amp; npm install &amp;&amp; npm run build</code>'
+          + '（ECharts 会打包进 static/dist），或把 echarts.min.js 放进 dashboard/static/ 再改本页的 script 地址。';
+        document.body.insertBefore(tip, document.body.firstChild);
+      });
+    }
+  </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {

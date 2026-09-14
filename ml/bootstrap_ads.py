@@ -98,6 +98,17 @@ def main() -> int:
     hourly_acc: dict[tuple, dict] = {}
     daily_acc: dict[tuple, dict] = {}
 
+    def new_daily_acc() -> dict:
+        return {
+            "orders": 0,
+            "revenue": 0.0,
+            "kwh": 0.0,
+            "occ": 0.0,       # 时间族占用分钟（已完成 + 待支付），对应 collector 的 occ_min
+            "dur_done": 0.0,  # 已完成且时长有效的分钟（avg_session_min 的分子）
+            "sess_done": 0,   # 已完成且时长有效的单数（avg_session_min 的分母）
+            "hour_orders": {},
+        }
+
     for station_id, start_at, end_at, kwh, amount, user_id in orders:
         start = parse_ts(start_at)
         if not start:
@@ -117,12 +128,30 @@ def main() -> int:
         h["duration"] += dur
         h["users"].add(user_id)
 
-        d = daily_acc.setdefault(key_d, {"orders": 0, "revenue": 0.0, "kwh": 0.0, "duration": 0.0, "hour_orders": {}})
+        d = daily_acc.setdefault(key_d, new_daily_acc())
         d["orders"] += 1
         d["revenue"] += float(amount or 0)
         d["kwh"] += float(kwh or 0)
-        d["duration"] += dur
+        d["occ"] += dur
+        if dur > 0:  # 缺 end_at / end<=start 的单不计入有效时长与分母（对齐 collector 的 ts_missing=0）
+            d["dur_done"] += dur
+            d["sess_done"] += 1
         d["hour_orders"][hour] = d["hour_orders"].get(hour, 0) + 1
+
+    # 时间族另一半：待支付单同样占用充电桩（collector: status IN ('已完成','待支付')）
+    pending_time = cur.execute(
+        """
+        SELECT station_id, start_at, end_at
+        FROM charge_order
+        WHERE status='待支付' AND start_at IS NOT NULL
+        """
+    ).fetchall()
+    for station_id, start_at, end_at in pending_time:
+        start = parse_ts(start_at)
+        if not start or start.date() < start_day or start.date() > end_day:
+            continue
+        d = daily_acc.setdefault((station_id, start.date().isoformat()), new_daily_acc())
+        d["occ"] += duration_minutes(start_at, end_at)
 
     for (station_id, ds, hour), h in hourly_acc.items():
         cur.execute(
@@ -146,9 +175,20 @@ def main() -> int:
     platform_day: dict[str, dict] = {}
     platform_hour_orders: dict[str, dict[int, int]] = {}
 
+    def new_platform_day() -> dict:
+        return {
+            "orders": 0,
+            "revenue": 0.0,
+            "kwh": 0.0,
+            "occ": 0.0,
+            "dur_done": 0.0,
+            "sess_done": 0,
+            "users": set(),
+        }
+
     for (station_id, ds), d in daily_acc.items():
         peak = max(d["hour_orders"], key=d["hour_orders"].get) if d["hour_orders"] else None
-        avg_session = d["duration"] / d["orders"] if d["orders"] else 0
+        avg_session = d["dur_done"] / d["sess_done"] if d["sess_done"] else 0
         row = cur.execute(
             "SELECT pile_cnt FROM ads_station_daily WHERE station_id=? AND stat_date=?",
             (station_id, ds),
@@ -157,10 +197,13 @@ def main() -> int:
             continue
         pile_cnt = row[0]
         turnover = d["orders"] / pile_cnt if pile_cnt else 0
+        occ_min = d["occ"]
+        utilization = min(occ_min / (pile_cnt * 1440.0), 1.0) if pile_cnt > 0 else 0.0
         cur.execute(
             """
             UPDATE ads_station_daily
-            SET orders=?, revenue=?, kwh=?, avg_session_min=?, turnover=?, peak_hour=?,
+            SET orders=?, revenue=?, kwh=?, occ_min=?, utilization=?,
+                avg_session_min=?, turnover=?, peak_hour=?,
                 updated_at=datetime('now','localtime')
             WHERE station_id=? AND stat_date=?
             """,
@@ -168,6 +211,8 @@ def main() -> int:
                 d["orders"],
                 round(d["revenue"], 2),
                 round(d["kwh"], 2),
+                round(occ_min, 2),
+                round(utilization, 4),
                 round(avg_session, 2),
                 round(turnover, 4),
                 peak,
@@ -176,23 +221,19 @@ def main() -> int:
             ),
         )
 
-        p = platform_day.setdefault(
-            ds,
-            {"orders": 0, "revenue": 0.0, "kwh": 0.0, "duration": 0.0, "users": set()},
-        )
+        p = platform_day.setdefault(ds, new_platform_day())
         p["orders"] += d["orders"]
         p["revenue"] += d["revenue"]
         p["kwh"] += d["kwh"]
-        p["duration"] += d["duration"]
+        p["occ"] += d["occ"]
+        p["dur_done"] += d["dur_done"]
+        p["sess_done"] += d["sess_done"]
         for hour, cnt in d["hour_orders"].items():
             platform_hour_orders.setdefault(ds, {})
             platform_hour_orders[ds][hour] = platform_hour_orders[ds].get(hour, 0) + cnt
 
     for (station_id, ds, hour), h in hourly_acc.items():
-        p = platform_day.setdefault(
-            ds,
-            {"orders": 0, "revenue": 0.0, "kwh": 0.0, "duration": 0.0, "users": set()},
-        )
+        p = platform_day.setdefault(ds, new_platform_day())
         p["users"].update(h["users"])
 
     pending_by_day = {
@@ -220,10 +261,7 @@ def main() -> int:
     day = start_day
     while day <= end_day:
         ds = day.isoformat()
-        p = platform_day.get(
-            ds,
-            {"orders": 0, "revenue": 0.0, "kwh": 0.0, "duration": 0.0, "users": set()},
-        )
+        p = platform_day.get(ds, new_platform_day())
         order_count = p["orders"]
         revenue = p["revenue"]
         kwh = p["kwh"]
@@ -234,14 +272,15 @@ def main() -> int:
             "SELECT COUNT(*) FROM user WHERE substr(created_at, 1, 10) <= ?",
             (ds,),
         ).fetchone()[0]
-        occ_min = p["duration"]
+        occ_min = p["occ"]  # 时间族：已完成 + 待支付
         completion = (
             order_count / (order_count + pending) if (order_count + pending) > 0 else 0.0
         )
         active_ratio = active_users / total_users if total_users > 0 else 0.0
         per_user_orders = order_count / active_users if active_users > 0 else 0.0
         per_user_kwh = kwh / active_users if active_users > 0 else 0.0
-        avg_session = occ_min / order_count if order_count > 0 else 0.0
+        # 与 collector 对齐：分母只算时长有效的已完成单
+        avg_session = p["dur_done"] / p["sess_done"] if p["sess_done"] > 0 else 0.0
         avg_kwh = kwh / order_count if order_count > 0 else 0.0
         utilization = min(occ_min / (pile_total * 1440.0), 1.0) if pile_total > 0 else 0.0
         hour_orders = platform_hour_orders.get(ds, {})

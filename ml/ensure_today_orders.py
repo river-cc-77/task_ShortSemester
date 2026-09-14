@@ -69,11 +69,17 @@ def main() -> int:
         price = float(price or 1.2)
         hour = 7 + (i % 16)
         minute = random.randint(0, 59)
+        now = datetime.now()
         start = today_base.replace(hour=hour, minute=minute)
-        if start > datetime.now():
-            start = datetime.now() - timedelta(minutes=random.randint(30, 180))
+        if start > now:
+            start = now - timedelta(minutes=random.randint(30, 180))
         duration_min = random.randint(25, 85)
         end = start + timedelta(minutes=duration_min)
+        if end > now:
+            # start 不在未来还不够：end = start + 25~85min 仍可能越过 now，
+            # 会被算成"已完成但尚未发生"的占用，虚高今天的 occ_min / utilization
+            start = now - timedelta(minutes=duration_min)
+            end = now
         kwh = round(float(power_kw) * duration_min / 60.0, 2)
         amount = round(kwh * price, 2)
 

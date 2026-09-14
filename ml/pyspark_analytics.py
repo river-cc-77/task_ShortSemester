@@ -55,7 +55,10 @@ def main() -> int:
     pile = read_csv(spark, "charging/dim/pile/pile.csv")
 
     # 1 电站排行
-    latest = daily.groupBy().agg(F.max("stat_date").alias("mx")).collect()[0]["mx"]
+    # 取"最近一个有真实订单的业务日"。MAX(stat_date) 会命中 export 出来的当天占位行
+    # （未发生的小时恒为 0），清晨跑一次排行就全是一堆 0。
+    latest_rows = daily.filter(F.col("orders") > 0).agg(F.max("stat_date").alias("mx")).collect()
+    latest = latest_rows[0]["mx"] if latest_rows else None  # 为 None 时下面过滤出空表
     rank = (
         daily.filter(F.col("stat_date") == latest)
         .join(station, daily.station_id == station.id)
@@ -71,9 +74,18 @@ def main() -> int:
     write_dimension(hourly_profile, "hourly_profile")
 
     # 3 区域
+    # 口径对齐 collector/clean.cpp 的 regionFromAddress：
+    # "深圳市福田区福中三路" -> "福田区"（去掉市名前缀）；无'区'的地址归 '未知'。
+    # 原正则 ([^区]+区) 从串首起匹配，得到的是"深圳市福田区"，与 ads_region_daily.region 对不上。
     region = (
         daily.join(station, daily.station_id == station.id)
-        .withColumn("region", F.regexp_extract("address", r"([^区]+区)", 1))
+        .withColumn(
+            "region",
+            F.when(
+                F.col("address").contains("区"),
+                F.regexp_extract("address", r"市?([^市]*区)", 1),
+            ).otherwise("未知"),
+        )
         .groupBy("region")
         .agg(F.sum("orders").alias("orders"), F.sum("revenue").alias("revenue"), F.sum("kwh").alias("kwh"))
     )

@@ -191,8 +191,10 @@ const stationHourOpt = computed(() => {
 const radarOpt = computed(() => {
   const rows = data.value?.station_util || []
   if (!rows.length) return {}
+  // 三轴都用数据驱动刻度：利用率写死 max:1 时，实际值只有 0.13~0.15，
+  // 顶点全挤在圆心附近，四个站看起来重合（悬浮 tooltip 仍显示真实数值）
   const indicators = [
-    { name: '利用率', max: 1 },
+    { name: '利用率', max: Math.max(...rows.map((r) => r.avg_util || 0), 0.1) },
     { name: '周转率', max: Math.max(...rows.map((r) => r.avg_turnover || 0), 1) },
     { name: '故障率', max: Math.max(...rows.map((r) => r.fault_rate || 0), 0.1) },
   ]

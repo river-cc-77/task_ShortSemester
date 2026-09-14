@@ -29,6 +29,29 @@ DASH_DIR = Path(__file__).resolve().parent
 DIST_DIR = DASH_DIR / "static" / "dist"
 ML_OUTPUT = DASH_DIR.parent / "ml" / "output"
 
+# 注: 所有"近 30 天"窗口用 date('now', 'localtime', '-30 day') 而非 date('now', '-30 day')。
+# stat_date 是业务自然日（localtime），collector 与 bootstrap 都按本地日物化，
+# 而 SQLite 的 date('now') 是 UTC —— 北京时间 00:00-08:00 之间两者差一天，
+# 会让窗口多算一天。
+
+# 区域名提取，与 collector/clean.cpp 的 regionFromAddress 对齐：
+# 取第一个'市'之后、第一个'区'(含)之前的片段，"深圳市福田区福中三路" -> "福田区"；
+# 无'区'的地址归 '未知'（原实现得到"深圳市福田区"，与 ads_region_daily.region 对不上）
+_REGION_EXPR = """
+    CASE
+        WHEN instr(s.address, '区') > 0 THEN
+            substr(
+                s.address,
+                CASE WHEN instr(s.address, '市') BETWEEN 1 AND instr(s.address, '区')
+                     THEN instr(s.address, '市') + 1 ELSE 1 END,
+                instr(s.address, '区')
+                    - CASE WHEN instr(s.address, '市') BETWEEN 1 AND instr(s.address, '区')
+                           THEN instr(s.address, '市') ELSE 0 END
+            )
+        ELSE '未知'
+    END
+"""
+
 app = Flask(__name__)
 
 
@@ -135,28 +158,24 @@ def api_time_forecast():
 
 @app.route("/api/station_hourly_today")
 def api_station_hourly_today():
+    """最近一个有真实订单的业务日的小时分布。
+
+    不能写成 `WHERE stat_date = 今天` 再加 `if not rows` 兜底：collector 和
+    bootstrap_ads 都会把"今天"物化成一行（未发生的小时恒为 0），于是行数非 0，
+    兜底分支永远不触发，曲线静默变空。直接选"最近一个有单日"一步到位。
+    """
     conn = connect()
-    today = datetime.now().strftime("%Y-%m-%d")
     rows = conn.execute(
         """
         SELECT h.stat_hour, SUM(h.kwh) AS kwh, SUM(h.orders) AS orders
         FROM ads_station_hourly h
-        WHERE h.stat_date = ?
+        WHERE h.stat_date = (
+            SELECT MAX(stat_date) FROM ads_station_hourly WHERE orders > 0
+        )
         GROUP BY h.stat_hour
         ORDER BY h.stat_hour
-        """,
-        (today,),
+        """
     ).fetchall()
-    if not rows:
-        rows = conn.execute(
-            """
-            SELECT h.stat_hour, SUM(h.kwh) AS kwh, SUM(h.orders) AS orders
-            FROM ads_station_hourly h
-            WHERE h.stat_date = (SELECT MAX(stat_date) FROM ads_station_hourly)
-            GROUP BY h.stat_hour
-            ORDER BY h.stat_hour
-            """
-        ).fetchall()
     conn.close()
     return jsonify(rows_to_dicts(rows))
 
@@ -164,12 +183,15 @@ def api_station_hourly_today():
 @app.route("/api/station_rank")
 def api_station_rank():
     conn = connect()
+    # 同上：MAX(stat_date) 会命中当天的全 0 占位行，排行榜整屏为 0
     rows = conn.execute(
         """
         SELECT s.name, d.orders, d.revenue, d.kwh, d.utilization, d.peak_hour, d.fault_rate
         FROM ads_station_daily d
         JOIN station s ON s.id = d.station_id
-        WHERE d.stat_date = (SELECT MAX(stat_date) FROM ads_station_daily)
+        WHERE d.stat_date = (
+            SELECT MAX(stat_date) FROM ads_station_daily WHERE orders > 0
+        )
         ORDER BY d.revenue DESC
         LIMIT 10
         """
@@ -186,7 +208,7 @@ def api_hourly_history():
         """
         SELECT stat_hour, SUM(kwh) AS kwh, SUM(orders) AS orders
         FROM ads_hourly_stats
-        WHERE stat_date >= date('now', '-30 day')
+        WHERE stat_date >= date('now', 'localtime', '-30 day')
         GROUP BY stat_hour
         ORDER BY stat_hour
         """
@@ -196,7 +218,7 @@ def api_hourly_history():
             """
             SELECT stat_hour, SUM(kwh) AS kwh, SUM(orders) AS orders
             FROM ads_station_hourly
-            WHERE stat_date >= date('now', '-30 day')
+            WHERE stat_date >= date('now', 'localtime', '-30 day')
             GROUP BY stat_hour
             ORDER BY stat_hour
             """
@@ -220,7 +242,7 @@ def api_weekday_weekend():
             SUM(order_count) AS orders,
             SUM(total_revenue) AS revenue
         FROM ads_daily_stats
-        WHERE stat_date >= date('now', '-30 day')
+        WHERE stat_date >= date('now', 'localtime', '-30 day')
         GROUP BY day_type
         """
     ).fetchall()
@@ -256,7 +278,7 @@ def api_station_util():
                AVG(d.fault_rate) AS fault_rate
         FROM ads_station_daily d
         JOIN station s ON s.id = d.station_id
-        WHERE d.stat_date >= date('now', '-30 day')
+        WHERE d.stat_date >= date('now', 'localtime', '-30 day')
         GROUP BY s.id, s.name
         ORDER BY avg_util DESC
         LIMIT 8
@@ -268,22 +290,18 @@ def api_station_util():
 
 @app.route("/api/region_stats")
 def api_region_stats():
-    """区域分布（从地址提取区名）。"""
+    """区域分布（从地址提取区名，口径同 ads_region_daily.region）。"""
     conn = connect()
     rows = conn.execute(
-        """
+        f"""
         SELECT
-            CASE
-                WHEN instr(s.address, '区') > 0
-                THEN substr(s.address, 1, instr(s.address, '区'))
-                ELSE '其他'
-            END AS region,
+            {_REGION_EXPR} AS region,
             SUM(d.orders) AS orders,
             SUM(d.revenue) AS revenue,
             SUM(d.kwh) AS kwh
         FROM ads_station_daily d
         JOIN station s ON s.id = d.station_id
-        WHERE d.stat_date >= date('now', '-30 day')
+        WHERE d.stat_date >= date('now', 'localtime', '-30 day')
         GROUP BY region
         ORDER BY revenue DESC
         """
@@ -301,7 +319,7 @@ def api_station_hour_matrix():
         SELECT s.name AS station_name, h.stat_hour, SUM(h.kwh) AS kwh, SUM(h.orders) AS orders
         FROM ads_station_hourly h
         JOIN station s ON s.id = h.station_id
-        WHERE h.stat_date >= date('now', '-30 day')
+        WHERE h.stat_date >= date('now', 'localtime', '-30 day')
         GROUP BY s.name, h.stat_hour
         ORDER BY s.name, h.stat_hour
         """

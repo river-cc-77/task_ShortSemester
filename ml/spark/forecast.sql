@@ -17,6 +17,9 @@ USE charging;
 SET spark.sql.sources.partitionOverwriteMode=dynamic;
 
 -- 近 N 天同 hour 加权移动平均
+-- 窗口为 [今天-history_days, 今天)，**不含今天**：当天可能只过了一半，甚至只有当天
+-- 那个全 0 占位行，而它的权重最大（days_ago=0 -> w=1.0），会把预测系统性拉低。
+-- 口径与 ml/predict_local.py 的 wma_same_hour 保持一致。
 CREATE OR REPLACE TEMP VIEW feat_wma AS
 SELECT
     station_id,
@@ -36,7 +39,7 @@ SELECT
         0
     ) AS wma_duration_min
 FROM dws_station_hourly
-WHERE datediff(current_date(), to_date(stat_date)) BETWEEN 0 AND 7
+WHERE datediff(current_date(), to_date(stat_date)) BETWEEN 1 AND 7
 GROUP BY station_id, stat_hour;
 
 -- 桩维度
@@ -61,10 +64,13 @@ SELECT
             LIMIT 1
         ),
         (
+            -- 网格里每站每天 24 行恒存在，必须用 HAVING 排除全 0 占位，
+            -- 否则 GROUP BY 一定返回一行，且按 stat_hour ASC 取到 0（误报 00:00 为高峰）
             SELECT h.stat_hour
             FROM dws_station_hourly h
             WHERE h.station_id = s.station_id
             GROUP BY h.stat_hour
+            HAVING SUM(h.orders) > 0
             ORDER BY AVG(h.orders) DESC, h.stat_hour ASC
             LIMIT 1
         )

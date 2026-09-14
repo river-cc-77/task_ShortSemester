@@ -23,6 +23,7 @@ import os
 import platform
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,7 +31,7 @@ ML = Path(__file__).resolve().parent
 COLLECTOR_BIN = ROOT / "collector" / "ads-collector"
 sys.path.insert(0, str(ML))
 
-from common import connect_db, resolve_db_path
+from common import connect_db, ensure_schema, resolve_db_path
 
 
 def run_py(script: str, *args: str) -> None:
@@ -39,34 +40,83 @@ def run_py(script: str, *args: str) -> None:
     subprocess.run(cmd, check=True)
 
 
-def check_ads_ready() -> bool:
+def ads_ready() -> bool:
+    """ads_* 里是否已经有聚合结果（只说明历史上有过数据）。"""
     conn = connect_db()
+    ensure_schema(conn)  # 全新库可能还没建表，先补齐再探测，避免 "no such table"
     hourly = conn.execute("SELECT COUNT(*) FROM ads_station_hourly").fetchone()[0]
     conn.close()
     return hourly > 0
 
 
+def ads_current() -> bool:
+    """今日那行是否已经有真实订单数据。
+
+    单看 ads_ready() 不够：今日这行即使存在，也可能是上一次留下的全 0 占位
+    （刚过零点、或 ensure_today_orders 补完单但还没重新聚合），
+    此时大屏的高峰/排行会静默变空。
+    """
+    conn = connect_db()
+    ensure_schema(conn)
+    today_orders = conn.execute(
+        "SELECT COALESCE(SUM(orders), 0) FROM ads_station_hourly "
+        "WHERE stat_date = date('now', 'localtime')"
+    ).fetchone()[0]
+    conn.close()
+    return int(today_orders) > 0
+
+
+def ads_fingerprint() -> tuple[int, str, int]:
+    """ads_station_hourly 的指纹：(行数, 最新 updated_at, 订单总数)。
+
+    判断「collector 是否真算完一轮」必须看指纹变化，而不是看表是否非空——
+    表非空只说明历史上有过数据，无法区分是不是本轮刚写的。
+    """
+    conn = connect_db()
+    row = conn.execute(
+        "SELECT COUNT(*), COALESCE(MAX(updated_at), ''), COALESCE(SUM(orders), 0) "
+        "FROM ads_station_hourly"
+    ).fetchone()
+    conn.close()
+    return (int(row[0]), str(row[1]), int(row[2]))
+
+
 def try_run_collector() -> bool:
-    """Linux 验收环境：ads_* 为空时跑 ads-collector，首轮回填完成后结束进程。"""
+    """Linux 验收环境：跑 ads-collector，等它算完一轮后再结束进程。
+
+    旧实现是「表非空即视为就绪」，在已有数据的库上会立刻 terminate，
+    而此刻 collector 连首轮 aggregate 都还没提交——SIGTERM 直接把该事务回滚，
+    于是 ensure_today_orders / generate_orders 刚补的单永远进不了 ads_*。
+    """
     if platform.system() != "Linux":
         return False
     if not (COLLECTOR_BIN.is_file() and os.access(COLLECTOR_BIN, os.X_OK)):
         return False
-    print("\n>>> ads_* 为空，运行 collector/ads-collector（首轮回填约 10~60s）...")
-    proc = subprocess.Popen([str(COLLECTOR_BIN)], cwd=ROOT / "collector")
-    try:
-        import time
 
+    before = ads_fingerprint()
+    print("\n>>> 运行 collector/ads-collector（首轮回填约 10~60s）...")
+    proc = subprocess.Popen([str(COLLECTOR_BIN)], cwd=ROOT / "collector")
+    changed = False
+    try:
         for _ in range(180):
-            if check_ads_ready():
-                proc.terminate()
-                proc.wait(timeout=5)
-                return True
+            # 先等待再检查：至少给 collector 1 秒完成首轮，避免刚启动就被判定为"已就绪"
             time.sleep(1)
+            if ads_fingerprint() != before:
+                changed = True
+                break
     finally:
         if proc.poll() is None:
-            proc.kill()
-    return check_ads_ready()
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+    if changed:
+        print("    ads_* 已刷新，collector 已停止")
+    else:
+        print("    [!] 180s 内未见 ads_* 变化，collector 可能未成功", file=sys.stderr)
+    return changed
 
 
 def main() -> int:
@@ -88,16 +138,16 @@ def main() -> int:
     if args.generate > 0:
         run_py("generate_orders.py", str(args.generate))
         run_py("ensure_today_orders.py")
-        if platform.system() == "Linux" and COLLECTOR_BIN.is_file():
-            try_run_collector()
 
-    if not check_ads_ready():
+    # 需要重新聚合的三种情形：刚补过单 / ads_* 是空的 / 今日那行仍是 0 占位。
+    # 只判断"表是否为空"会漏掉后两种里最常见的一种 —— 表有历史数据但今天的没算进去。
+    if args.generate > 0 or not ads_ready() or not ads_current():
         if args.bootstrap_ads or platform.system() != "Linux":
             if platform.system() != "Linux":
                 print("\n>>> 非 Linux 环境，使用 bootstrap_ads.py 生成 ads_*（演示/开发）")
             run_py("bootstrap_ads.py")
         elif not try_run_collector():
-            print("\n[!] ads_station_hourly 为空。Linux 验收环境请:")
+            print("\n[!] ads_station_hourly 为空或今日无数据。Linux 验收环境请:")
             print("    cd collector && qmake6 collector.pro && make -j4 && ./ads-collector")
             print("    或一键: bash ml/run_pipeline.sh --generate 3000")
             print("    或应急: python ml/run_pipeline.py --bootstrap-ads")

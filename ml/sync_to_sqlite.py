@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import OUTPUT_DIR, connect_db, resolve_db_path
+from common import OUTPUT_DIR, VALID_HORIZONS, connect_db, ensure_schema, resolve_db_path
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -24,12 +24,27 @@ def read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(fp))
 
 
+def check_rows(rows: list[dict[str, str]], label: str) -> None:
+    if not rows:
+        raise SystemExit(f"{label} CSV 没有任何数据行，已中止以免清空预测表")
+    for i, row in enumerate(rows, start=2):  # 第 1 行是表头
+        horizon = row.get("horizon", "")
+        if horizon not in VALID_HORIZONS:
+            raise SystemExit(
+                f"{label} CSV 第 {i} 行 horizon={horizon!r} 非法，"
+                f"只允许 {sorted(VALID_HORIZONS)}（会撞 schema 的 CHECK 约束）"
+            )
+
+
 def sync(load_file: Path, time_file: Path) -> None:
     db_path = resolve_db_path()
     conn = connect_db(db_path)
+    ensure_schema(conn)
 
     load_rows = read_csv(load_file)
     time_rows = read_csv(time_file)
+    check_rows(load_rows, "load_forecast")
+    check_rows(time_rows, "time_forecast")
 
     conn.execute("DELETE FROM load_forecast")
     conn.execute("DELETE FROM time_forecast")

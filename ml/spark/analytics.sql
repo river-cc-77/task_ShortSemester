@@ -43,13 +43,13 @@ FROM (
 GROUP BY stat_date
 ORDER BY stat_date;
 
--- 2 电站排行（最近一日）
+-- 2 电站排行（最近一个有订单的业务日——MAX(stat_date) 会命中当天占位行，未发生的小时恒为 0）
 CREATE OR REPLACE TABLE analytics_station_rank
 USING parquet LOCATION '/charging/ads/analytics/station_rank' AS
 SELECT s.name, d.orders, d.revenue, d.kwh, d.utilization, d.peak_hour, d.fault_rate
 FROM dws_station_daily d
 JOIN dim_station s ON s.id = d.station_id
-WHERE d.stat_date = (SELECT MAX(stat_date) FROM dws_station_daily)
+WHERE d.stat_date = (SELECT MAX(stat_date) FROM dws_station_daily WHERE orders > 0)
 ORDER BY d.revenue DESC;
 
 -- 3 24 小时负荷曲线（近 30 天汇总）
@@ -62,17 +62,24 @@ GROUP BY stat_hour
 ORDER BY stat_hour;
 
 -- 4 区域分布（从地址提取区名）
+-- 口径对齐 collector/clean.cpp 的 regionFromAddress：
+-- "深圳市福田区福中三路" -> "福田区"（去掉市名前缀）；无'区'的地址归 '未知'。
+-- 原正则 ([^区]+区) 从串首起匹配，得到的是"深圳市福田区"，与 ads_region_daily.region 对不上。
 CREATE OR REPLACE TABLE analytics_region_stats
 USING parquet LOCATION '/charging/ads/analytics/region_stats' AS
 SELECT
-    regexp_extract(address, '([^区]+区)', 1) AS region,
+    CASE WHEN address LIKE '%区%'
+         THEN regexp_extract(address, '市?([^市]*区)', 1)
+         ELSE '未知' END AS region,
     SUM(orders) AS orders,
     SUM(revenue) AS revenue,
     SUM(kwh) AS kwh
 FROM dws_station_daily d
 JOIN dim_station s ON s.id = d.station_id
 WHERE datediff(current_date(), to_date(d.stat_date)) BETWEEN 0 AND 30
-GROUP BY regexp_extract(address, '([^区]+区)', 1);
+GROUP BY CASE WHEN address LIKE '%区%'
+              THEN regexp_extract(address, '市?([^市]*区)', 1)
+              ELSE '未知' END;
 
 -- 5 电桩状态分布
 CREATE OR REPLACE TABLE analytics_pile_status
