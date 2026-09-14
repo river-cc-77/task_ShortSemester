@@ -85,19 +85,28 @@ const pileOpt = computed(() => ({
 
 const hourlyOpt = computed(() => {
   const rows = data.value?.station_hourly_today || []
+  const hours = Array.from({ length: 24 }, (_, i) => i)
+  const kwhData = hours.map((h) => {
+    const row = rows.find((r) => Number(r.stat_hour) === h)
+    return row ? round2(row.kwh) : 0
+  })
+  const orderData = hours.map((h) => {
+    const row = rows.find((r) => Number(r.stat_hour) === h)
+    return row ? Number(row.orders) : 0
+  })
   return {
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis' },
+    tooltip: tooltipAxis2,
     legend: { data: ['kWh', '订单'], textStyle: { color: '#cbd5e1' } },
     grid: { left: 48, right: 16, top: 36, bottom: 28 },
-    xAxis: { type: 'category', data: rows.map((r) => `${r.stat_hour}:00`), axisLabel: { color: '#94a3b8' } },
+    xAxis: { type: 'category', data: hours.map((h) => `${h}:00`), axisLabel: { color: '#94a3b8' } },
     yAxis: [
       { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1e293b' } } },
       { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { show: false } },
     ],
     series: [
-      { name: 'kWh', type: 'bar', data: rows.map((r) => r.kwh), color: '#22c55e' },
-      { name: '订单', type: 'line', yAxisIndex: 1, data: rows.map((r) => r.orders), color: '#f59e0b' },
+      { name: 'kWh', type: 'bar', data: kwhData, color: '#22c55e' },
+      { name: '订单', type: 'line', yAxisIndex: 1, data: orderData, color: '#f59e0b' },
     ],
   }
 })
