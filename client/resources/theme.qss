@@ -337,6 +337,33 @@ QLabel#profileSummary {
     line-height: 150%;
 }
 
+/* 页2 余额：比概览正文更突出，与右侧「充值」按钮同一行 */
+QLabel#profileBalance {
+    color: #1F2D4D;
+    font-size: 12pt;
+    font-weight: 700;
+}
+
+/* 页2 充值按钮。必须带上祖先 #pageProfile —— 下面那条
+   「QWidget#pageProfile QPushButton」特异性是 (1,0,2)，高于单写
+   QPushButton#rechargeButton 的 (1,0,1)，否则这里的圆角/配色会被它覆盖。 */
+QWidget#pageProfile QPushButton#rechargeButton {
+    background-color: #2B6BFF;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 15px;
+    padding: 7px 20px;
+    font-size: 10pt;
+    font-weight: 600;
+    min-width: 60px;
+}
+QWidget#pageProfile QPushButton#rechargeButton:hover {
+    background-color: #1E5AE8;
+}
+QWidget#pageProfile QPushButton#rechargeButton:pressed {
+    background-color: #1848C4;
+}
+
 /* 个人中心的四个入口按钮（手机紧凑样式，原在顶部卡片里） */
 QWidget#pageProfile QPushButton {
     padding: 12px 8px;

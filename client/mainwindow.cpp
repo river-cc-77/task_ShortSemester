@@ -447,6 +447,27 @@ QWidget *MainWindow::buildProfilePage()
     cardLay->setSpacing(6);
     cardLay->addLayout(infoRow);
 
+    // 余额 + 充值并排直接摆在页面上。原充值入口藏在「编辑资料」弹窗里，
+    // 要充值得先点开那个弹窗，与「余额」这个高频操作不匹配。
+    m_balanceLabel = new QLabel(profileCard);
+    m_balanceLabel->setObjectName(QStringLiteral("profileBalance"));
+
+    m_rechargeButton = new QPushButton(QStringLiteral("充值"), profileCard);
+    m_rechargeButton->setObjectName(QStringLiteral("rechargeButton"));
+    m_rechargeButton->setCursor(Qt::PointingHandCursor);
+    connect(m_rechargeButton, &QPushButton::clicked, this, [this]() {
+        // 与「编辑资料」弹窗里的「充值」按钮共用同一份实现，不复制业务代码
+        showRechargeDialog(this);
+    });
+
+    auto *balanceRow = new QHBoxLayout;
+    balanceRow->setSpacing(10);
+    balanceRow->addWidget(m_balanceLabel, 1);
+    balanceRow->addWidget(m_rechargeButton, 0);
+
+    cardLay->addSpacing(4);
+    cardLay->addLayout(balanceRow);
+
     // 四个入口沿用原顶部卡片上的同名按钮对象 → mainwindow.cpp 里原有的 connect 全部继续有效
     m_profileButton = new QPushButton(QStringLiteral("编辑资料"), page);
     m_orderButton = new QPushButton(QStringLiteral("订单历史"), page);
@@ -1036,83 +1057,98 @@ void MainWindow::onProfileCenter()
         dlg.accept();
     });
 
-    // 余额充值
+    // 余额充值：与页2 的「充值」按钮共用 showRechargeDialog()，不再各写一份
     connect(rechargeBtn, &QPushButton::clicked, &dlg, [&]() {
-        QDialog rechargeDlg(&dlg);
-        rechargeDlg.setWindowTitle(QStringLiteral("余额充值"));
-        fitChildDialog(&rechargeDlg, &dlg, 200);   // 随上级窗口自适应
-
-        auto *rLay = new QVBoxLayout(&rechargeDlg);
-        auto *curBalanceLabel = new QLabel(
-            QStringLiteral("当前余额：%1 元")
-                .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2), &rechargeDlg);
-        auto *amountEdit = new QLineEdit(&rechargeDlg);
-        amountEdit->setPlaceholderText(QStringLiteral("请输入充值金额（最多2位小数）"));
-        amountEdit->setValidator(new QDoubleValidator(0.01, 999999.0, 2, &rechargeDlg));
-
-        auto *confirmBtn = new QPushButton(QStringLiteral("确认充值"), &rechargeDlg);
-        auto *cancelBtn2 = new QPushButton(QStringLiteral("取消"), &rechargeDlg);
-        confirmBtn->setStyleSheet(m_refreshButton->styleSheet());
-        cancelBtn2->setStyleSheet(m_refreshButton->styleSheet());
-
-        auto *btnRow2 = new QHBoxLayout;
-        btnRow2->addStretch();
-        btnRow2->addWidget(confirmBtn);
-        btnRow2->addWidget(cancelBtn2);
-
-        rLay->addWidget(curBalanceLabel);
-        rLay->addWidget(amountEdit);
-        rLay->addStretch();
-        rLay->addLayout(btnRow2);
-
-        curBalanceLabel->setStyleSheet(m_statusLabel->styleSheet());
-        amountEdit->setStyleSheet(m_latEdit->styleSheet());
-
-        connect(cancelBtn2, &QPushButton::clicked, &rechargeDlg, &QDialog::reject);
-
-        connect(confirmBtn, &QPushButton::clicked, &rechargeDlg, [&]() {
-            const QString amountStr = amountEdit->text().trimmed();
-            // 校验：非空、>0、最多2位小数
-            if (amountStr.isEmpty()) {
-                QMessageBox::warning(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("请输入有效充值金额"));
-                return;
-            }
-            const QStringList parts = amountStr.split('.');
-            if (parts.size() == 2 && parts[1].length() > 2) {
-                QMessageBox::warning(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("请输入有效充值金额"));
-                return;
-            }
-            const double amount = amountStr.toDouble();
-            if (amount <= 0) {
-                QMessageBox::warning(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("请输入有效充值金额"));
-                return;
-            }
-
-            QJsonObject reqData;
-            reqData["amount"] = amount;
-            const QJsonObject resp = m_api->call(QStringLiteral("user.recharge"), reqData);
-            if (!resp.value(QStringLiteral("ok")).toBool()) {
-                const QJsonObject err = resp.value(QStringLiteral("error")).toObject();
-                QMessageBox::warning(&rechargeDlg, QStringLiteral("充值失败"),
-                                     err.value(QStringLiteral("message")).toString());
-                return;
-            }
-            const double newBalance = resp.value(QStringLiteral("data")).toObject()
-                                         .value(QStringLiteral("balance")).toDouble();
-            // 更新本地余额 + 个人中心显示 + 主窗口欢迎语
-            m_user["balance"] = newBalance;
-            balanceLabel->setText(QStringLiteral("余额：%1 元").arg(newBalance, 0, 'f', 2));
-            curBalanceLabel->setText(QStringLiteral("当前余额：%1 元").arg(newBalance, 0, 'f', 2));
-            updateUserHeaderLabel();
-            QMessageBox::information(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("充值成功"));
-            rechargeDlg.accept();
-        });
-
-        rechargeDlg.exec();
+        if (showRechargeDialog(&dlg)) {
+            balanceLabel->setText(QStringLiteral("余额：%1 元")
+                                      .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2));
+        }
     });
 
 
     dlg.exec();
+}
+
+// 余额充值弹窗。页2 的「充值」按钮和「编辑资料」弹窗里的「充值」都走这里，全校验与
+// 请求逻辑只有一份。充值成功返回 true，由调用方刷新自己那块余额显示
+// （顶栏与页2 概览在 updateUserHeaderLabel() 里已统一刷新）。
+// 注：结算弹窗（showSettleDialog）里的充值是有意不同的实现 —— 它按「应付-余额」
+// 预填金额并提示应付，不复用本函数。
+bool MainWindow::showRechargeDialog(QWidget *parent)
+{
+    QDialog rechargeDlg(parent);
+    rechargeDlg.setWindowTitle(QStringLiteral("余额充值"));
+    fitChildDialog(&rechargeDlg, parent, 200);   // 随上级窗口自适应
+
+    auto *rLay = new QVBoxLayout(&rechargeDlg);
+    auto *curBalanceLabel = new QLabel(
+        QStringLiteral("当前余额：%1 元")
+            .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2), &rechargeDlg);
+    auto *amountEdit = new QLineEdit(&rechargeDlg);
+    amountEdit->setPlaceholderText(QStringLiteral("请输入充值金额（最多2位小数）"));
+    amountEdit->setValidator(new QDoubleValidator(0.01, 999999.0, 2, &rechargeDlg));
+
+    auto *confirmBtn = new QPushButton(QStringLiteral("确认充值"), &rechargeDlg);
+    auto *cancelBtn = new QPushButton(QStringLiteral("取消"), &rechargeDlg);
+    confirmBtn->setStyleSheet(m_refreshButton->styleSheet());
+    cancelBtn->setStyleSheet(m_refreshButton->styleSheet());
+
+    auto *btnRow = new QHBoxLayout;
+    btnRow->addStretch();
+    btnRow->addWidget(confirmBtn);
+    btnRow->addWidget(cancelBtn);
+
+    rLay->addWidget(curBalanceLabel);
+    rLay->addWidget(amountEdit);
+    rLay->addStretch();
+    rLay->addLayout(btnRow);
+
+    curBalanceLabel->setStyleSheet(m_statusLabel->styleSheet());
+    amountEdit->setStyleSheet(m_latEdit->styleSheet());
+
+    connect(cancelBtn, &QPushButton::clicked, &rechargeDlg, &QDialog::reject);
+
+    bool succeeded = false;
+    connect(confirmBtn, &QPushButton::clicked, &rechargeDlg, [&]() {
+        const QString amountStr = amountEdit->text().trimmed();
+        // 校验：非空、>0、最多2位小数
+        if (amountStr.isEmpty()) {
+            QMessageBox::warning(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("请输入有效充值金额"));
+            return;
+        }
+        const QStringList parts = amountStr.split('.');
+        if (parts.size() == 2 && parts[1].length() > 2) {
+            QMessageBox::warning(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("请输入有效充值金额"));
+            return;
+        }
+        const double amount = amountStr.toDouble();
+        if (amount <= 0) {
+            QMessageBox::warning(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("请输入有效充值金额"));
+            return;
+        }
+
+        QJsonObject reqData;
+        reqData["amount"] = amount;
+        const QJsonObject resp = m_api->call(QStringLiteral("user.recharge"), reqData);
+        if (!resp.value(QStringLiteral("ok")).toBool()) {
+            const QJsonObject err = resp.value(QStringLiteral("error")).toObject();
+            QMessageBox::warning(&rechargeDlg, QStringLiteral("充值失败"),
+                                 err.value(QStringLiteral("message")).toString());
+            return;
+        }
+        const double newBalance = resp.value(QStringLiteral("data")).toObject()
+                                      .value(QStringLiteral("balance")).toDouble();
+        // 更新本地余额；顶栏、页2 概览、页2 余额标签都由 updateUserHeaderLabel() 统一刷新
+        m_user["balance"] = newBalance;
+        curBalanceLabel->setText(QStringLiteral("当前余额：%1 元").arg(newBalance, 0, 'f', 2));
+        updateUserHeaderLabel();
+        succeeded = true;
+        QMessageBox::information(&rechargeDlg, QStringLiteral("提示"), QStringLiteral("充值成功"));
+        rechargeDlg.accept();
+    });
+
+    rechargeDlg.exec();
+    return succeeded;
 }
 
 void MainWindow::onOrderHistory()
@@ -1517,13 +1553,18 @@ void MainWindow::updateUserHeaderLabel()
                                  .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2));
     }
     // 页2 的账户概览与顶栏同源，一并刷新（两处都从 m_user 取值，不会不一致）
+    // 余额不在这里显示：它已移到页面下方与「充值」按钮同一行，
+    // 两处都写会出现同一页两个余额
     if (m_profileSummaryLabel) {
         m_profileSummaryLabel->setText(
-            QStringLiteral("昵称：%1\n手机号：%2\n账户状态：%3\n余额：%4 元")
+            QStringLiteral("昵称：%1\n手机号：%2\n账户状态：%3")
                 .arg(m_user.value(QStringLiteral("nickname")).toString())
                 .arg(m_user.value(QStringLiteral("phone")).toString())
-                .arg(m_user.value(QStringLiteral("status")).toString())
-                .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2));
+                .arg(m_user.value(QStringLiteral("status")).toString()));
+    }
+    if (m_balanceLabel) {
+        m_balanceLabel->setText(QStringLiteral("余额：%1 元")
+                                    .arg(m_user.value(QStringLiteral("balance")).toDouble(), 0, 'f', 2));
     }
     // 页2 头像与概览同源。放在这里刷新，所以「一进个人中心」就能看到头像，
     // 而不是必须点开「编辑资料」才显示。

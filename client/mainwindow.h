@@ -50,6 +50,7 @@ private:
     QJsonObject geocodeByBaidu(const QString &address);// 调用百度地图地理编码 API，返回 {lat, lng}，失败返回空对象
     bool refreshUserProfile();   // 从服务端同步用户资料（含余额）
     void updateUserHeaderLabel(); // 刷新顶部欢迎/余额栏
+    bool showRechargeDialog(QWidget *parent);   // 余额充值弹窗；充值成功返回 true
     QJsonObject fetchOrderByNo(const QString &orderNo); // 从服务端拉取最新订单快照
     bool checkOpenOrder(bool failClosed = false);   // 检查未完成订单，有则弹窗提示并返回 true
     bool cancelReservation(const QString &orderNo); // 用户取消预约
@@ -67,6 +68,8 @@ private:
     QPushButton *m_locationChip = nullptr;      // 页0 的位置摘要（点击进地图页）
     QLabel *m_profileSummaryLabel = nullptr;    // 页2 账户概览
     QLabel *m_avatarLabel = nullptr;            // 页2 头像（进页即显示，不必先点「编辑资料」）
+    QLabel *m_balanceLabel = nullptr;           // 页2 余额（与「充值」按钮同一行）
+    QPushButton *m_rechargeButton = nullptr;    // 页2 充值入口（原来只在「编辑资料」弹窗里）
     // 站点详情弹窗里点「导航」时先把目的地记下，等 exec() 返回再切页
     // （模态事件循环还在时切页会被模态窗盖住）
     bool m_pendingNav = false;
