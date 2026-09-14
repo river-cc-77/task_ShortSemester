@@ -3,29 +3,27 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { BarChart, LineChart, PieChart, HeatmapChart, RadarChart, GaugeChart, ScatterChart } from 'echarts/charts'
+import { BarChart, LineChart, PieChart, RadarChart, GaugeChart, ScatterChart } from 'echarts/charts'
 import {
   GridComponent,
   TooltipComponent,
   LegendComponent,
-  VisualMapComponent,
   RadarComponent,
 } from 'echarts/components'
 import { fetchAll } from './api.js'
+import { axisMoney, fmtMoney, round2, tooltipAxis2, tooltipMoney } from './format.js'
 
 use([
   CanvasRenderer,
   BarChart,
   LineChart,
   PieChart,
-  HeatmapChart,
   RadarChart,
   GaugeChart,
   ScatterChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
-  VisualMapComponent,
   RadarComponent,
 ])
 
@@ -41,7 +39,7 @@ const kpiCards = computed(() => {
     ['充电站', k.station_count ?? '-'],
     ['电桩总数', k.pile_count ?? '-'],
     ['空闲桩', k.idle_piles ?? '-'],
-    ['日营收(元)', d.total_revenue != null ? Number(d.total_revenue).toFixed(2) : '-'],
+    ['日营收(元)', fmtMoney(d.total_revenue)],
     ['日订单', d.order_count ?? '-'],
   ]
 })
@@ -50,17 +48,21 @@ const revenueOpt = computed(() => {
   const rows = data.value?.revenue_trend || []
   return {
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis' },
+    tooltip: tooltipMoney,
     grid: { left: 48, right: 16, top: 24, bottom: 28 },
     xAxis: { type: 'category', data: rows.map((r) => r.stat_date), axisLabel: { color: '#94a3b8' } },
-    yAxis: { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1e293b' } } },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: '#94a3b8', formatter: axisMoney },
+      splitLine: { lineStyle: { color: '#1e293b' } },
+    },
     series: [
       {
         name: '营收',
         type: 'line',
         smooth: true,
         areaStyle: { color: 'rgba(56,189,248,0.25)' },
-        data: rows.map((r) => r.total_revenue),
+        data: rows.map((r) => round2(r.total_revenue)),
         color: '#38bdf8',
       },
     ],
@@ -69,15 +71,14 @@ const revenueOpt = computed(() => {
 
 const pileOpt = computed(() => ({
   backgroundColor: 'transparent',
-  tooltip: { trigger: 'item' },
+  tooltip: { trigger: 'item', valueFormatter: (v) => `${v} 台` },
   legend: { bottom: 0, textStyle: { color: '#cbd5e1' } },
   series: [
     {
       type: 'pie',
-      radius: ['42%', '68%'],
-      roseType: 'area',
+      radius: '62%',
       data: (data.value?.pile_status || []).map((r) => ({ name: r.status, value: r.cnt })),
-      label: { color: '#e2e8f0' },
+      label: { color: '#e2e8f0', formatter: '{b}: {c} ({d}%)' },
     },
   ],
 }))
@@ -105,11 +106,15 @@ const rankOpt = computed(() => {
   const rows = [...(data.value?.station_rank || [])].reverse()
   return {
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis' },
+    tooltip: tooltipMoney,
     grid: { left: 96, right: 16, top: 16, bottom: 28 },
-    xAxis: { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1e293b' } } },
+    xAxis: {
+      type: 'value',
+      axisLabel: { color: '#94a3b8', formatter: axisMoney },
+      splitLine: { lineStyle: { color: '#1e293b' } },
+    },
     yAxis: { type: 'category', data: rows.map((r) => r.name), axisLabel: { color: '#94a3b8' } },
-    series: [{ type: 'bar', data: rows.map((r) => r.revenue), color: '#818cf8' }],
+    series: [{ type: 'bar', data: rows.map((r) => round2(r.revenue)), color: '#818cf8' }],
   }
 })
 
@@ -140,35 +145,37 @@ const weekdayOpt = computed(() => {
       { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { show: false } },
     ],
     series: [
-      { name: 'kWh', type: 'bar', data: rows.map((r) => r.kwh), color: '#6366f1' },
+      { name: 'kWh', type: 'bar', data: rows.map((r) => round2(r.kwh)), color: '#6366f1' },
       { name: '订单', type: 'line', yAxisIndex: 1, data: rows.map((r) => r.orders), color: '#f97316' },
     ],
   }
 })
 
-const heatmapOpt = computed(() => {
+const stationHourOpt = computed(() => {
   const rows = data.value?.station_hour_matrix || []
   const stations = [...new Set(rows.map((r) => r.station_name))]
-  const hours = Array.from({ length: 24 }, (_, i) => i)
-  const matrix = rows.map((r) => [hours.indexOf(Number(r.stat_hour)), stations.indexOf(r.station_name), Number(r.kwh)])
-  const maxVal = Math.max(...matrix.map((m) => m[2]), 1)
+  const hours = Array.from({ length: 24 }, (_, i) => `${i}:00`)
   return {
     backgroundColor: 'transparent',
-    tooltip: { position: 'top' },
-    grid: { left: 88, right: 48, top: 16, bottom: 48 },
-    xAxis: { type: 'category', data: hours.map((h) => `${h}h`), splitArea: { show: true }, axisLabel: { color: '#94a3b8' } },
-    yAxis: { type: 'category', data: stations, splitArea: { show: true }, axisLabel: { color: '#94a3b8' } },
-    visualMap: {
-      min: 0,
-      max: maxVal,
-      calculable: true,
-      orient: 'horizontal',
-      left: 'center',
-      bottom: 0,
-      inRange: { color: ['#0f172a', '#0369a1', '#38bdf8', '#fde047'] },
-      textStyle: { color: '#94a3b8' },
+    tooltip: tooltipAxis2,
+    legend: { data: stations, bottom: 0, textStyle: { color: '#cbd5e1' }, type: 'scroll' },
+    grid: { left: 48, right: 16, top: 36, bottom: 56 },
+    xAxis: { type: 'category', data: hours, axisLabel: { color: '#94a3b8' } },
+    yAxis: {
+      type: 'value',
+      name: 'kWh',
+      axisLabel: { color: '#94a3b8', formatter: axisMoney },
+      splitLine: { lineStyle: { color: '#1e293b' } },
     },
-    series: [{ type: 'heatmap', data: matrix, label: { show: false } }],
+    series: stations.map((name) => ({
+      name,
+      type: 'line',
+      smooth: true,
+      data: hours.map((_, i) => {
+        const row = rows.find((r) => r.station_name === name && Number(r.stat_hour) === i)
+        return row ? round2(row.kwh) : 0
+      }),
+    })),
   }
 })
 
@@ -212,7 +219,7 @@ const regionOpt = computed(() => {
         type: 'pie',
         radius: ['20%', '65%'],
         center: ['50%', '52%'],
-        data: rows.map((r) => ({ name: r.region || '其他', value: r.revenue })),
+        data: rows.map((r) => ({ name: r.region || '其他', value: round2(r.revenue) })),
         label: { color: '#e2e8f0' },
       },
     ],
@@ -284,6 +291,10 @@ const gaugeOpt = computed(() => {
 const evalLoad = computed(() => data.value?.ml_evaluation?.load_kwh || {})
 const evalDuration = computed(() => data.value?.ml_evaluation?.duration_min || {})
 
+function fmtMetric(v) {
+  return v == null ? '—' : round2(v).toFixed(2)
+}
+
 async function refresh() {
   try {
     data.value = await fetchAll()
@@ -327,7 +338,7 @@ onUnmounted(() => clearInterval(timer))
       </dv-border-box-1>
 
       <dv-border-box-1 class="panel">
-        <div class="panel-title">电桩状态（玫瑰饼图）</div>
+        <div class="panel-title">电桩状态（饼图）</div>
         <VChart class="chart" :option="pileOpt" autoresize />
       </dv-border-box-1>
 
@@ -362,8 +373,8 @@ onUnmounted(() => clearInterval(timer))
       </dv-border-box-13>
 
       <dv-border-box-13 class="panel full">
-        <div class="panel-title">交叉对比 2：电站 × 小时热力矩阵</div>
-        <VChart class="chart tall" :option="heatmapOpt" autoresize />
+        <div class="panel-title">交叉对比 2：各站 24 小时充电量（折线）</div>
+        <VChart class="chart tall" :option="stationHourOpt" autoresize />
       </dv-border-box-13>
 
       <dv-border-box-1 class="panel">
@@ -386,27 +397,27 @@ onUnmounted(() => clearInterval(timer))
         <div class="eval-row">
           <div class="eval-item">
             <div class="label">负荷 MAE (kWh)</div>
-            <div class="value">{{ evalLoad.mae ?? '—' }}</div>
+            <div class="value">{{ fmtMetric(evalLoad.mae) }}</div>
           </div>
           <div class="eval-item">
             <div class="label">负荷 RMSE</div>
-            <div class="value">{{ evalLoad.rmse ?? '—' }}</div>
+            <div class="value">{{ fmtMetric(evalLoad.rmse) }}</div>
           </div>
           <div class="eval-item">
             <div class="label">负荷 MAPE (%)</div>
-            <div class="value">{{ evalLoad.mape_pct ?? '—' }}</div>
+            <div class="value">{{ fmtMetric(evalLoad.mape_pct) }}</div>
           </div>
           <div class="eval-item">
             <div class="label">时长 MAE (min)</div>
-            <div class="value">{{ evalDuration.mae ?? '—' }}</div>
+            <div class="value">{{ fmtMetric(evalDuration.mae) }}</div>
           </div>
           <div class="eval-item">
             <div class="label">时长 RMSE</div>
-            <div class="value">{{ evalDuration.rmse ?? '—' }}</div>
+            <div class="value">{{ fmtMetric(evalDuration.rmse) }}</div>
           </div>
           <div class="eval-item">
             <div class="label">时长 MAPE (%)</div>
-            <div class="value">{{ evalDuration.mape_pct ?? '—' }}</div>
+            <div class="value">{{ fmtMetric(evalDuration.mape_pct) }}</div>
           </div>
         </div>
       </dv-border-box-8>

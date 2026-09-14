@@ -23,7 +23,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, send_from_directory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db import connect, rows_to_dicts
+from db import connect, rows_to_dicts, sanitize_row, sanitize_value
 
 DASH_DIR = Path(__file__).resolve().parent
 DIST_DIR = DASH_DIR / "static" / "dist"
@@ -73,9 +73,10 @@ def api_kpi():
     piles = conn.execute("SELECT COUNT(*) AS c FROM pile").fetchone()["c"]
     idle = conn.execute("SELECT COUNT(*) AS c FROM pile WHERE status='闲置'").fetchone()["c"]
     conn.close()
+    latest = sanitize_row(dict(row)) if row else {}
     return jsonify(
         {
-            "latest_daily": dict(row) if row else {},
+            "latest_daily": latest,
             "station_count": stations,
             "pile_count": piles,
             "idle_piles": idle,
@@ -314,7 +315,7 @@ def api_ml_evaluation():
     """WMA 模型离线评估指标（ml/evaluate.py 产出）。"""
     path = ML_OUTPUT / "evaluation.json"
     if path.is_file():
-        return jsonify(json.loads(path.read_text(encoding="utf-8")))
+        return jsonify(sanitize_value(json.loads(path.read_text(encoding="utf-8"))))
     return jsonify(
         {
             "model": "WMA",
