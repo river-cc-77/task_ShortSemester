@@ -255,7 +255,7 @@ erDiagram
 ### 7.5 机器学习 `ml/`
 
 - `collector` 产出 `ads_station_hourly` 等特征表；`export_to_hdfs.py` 入湖，Hive + Spark SQL 预测
-- 本地开发可用 `predict_local.py`（与 Spark SQL 同算法）写回 SQLite
+- 本地开发可用 `predict_local.py`（加权移动平均 WMA，与 Spark SQL 同算法）写回 SQLite
 - 负荷预测 → `load_forecast`（`forecast.list`）；充电时间预测 → `time_forecast`（`timeforecast.list`）
 - 可选 `generate_orders.py` 批量造历史订单，供演示与验收
 

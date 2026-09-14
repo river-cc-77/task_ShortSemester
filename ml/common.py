@@ -18,6 +18,13 @@ HORIZONS = {"1h": 1, "6h": 6, "24h": 24}
 HISTORY_DAYS = 7
 
 
+def wma_weight(days_ago: int) -> float:
+    """加权移动平均权重：越近的历史权重越大。w = 1 / (days_ago + 1)。"""
+    if days_ago < 0:
+        return 0.0
+    return 1.0 / (days_ago + 1)
+
+
 def resolve_db_path() -> Path:
     env = os.environ.get("ADS_DB") or os.environ.get("CHARGE_DB")
     if env:

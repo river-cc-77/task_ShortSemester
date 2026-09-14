@@ -69,11 +69,12 @@ cd .. && bash ml/run_pipeline.sh   # 导出 + predict_local
 
 `bootstrap_ads.py` 仅作**无法编译 collector 时的应急**，**验收/demo 请一律用 ads-collector**。
 
-## 算法（Spark SQL only）
+## 算法（加权移动平均 WMA）
 
-- **负荷** `predicted_load` = 过去 7 天同 `stat_hour` 的 `kwh` 均值  
+- **负荷** `predicted_load` = 过去 7 天同 `stat_hour` 的 `kwh` **加权平均**  
+- **充电时长** `predicted_avg_duration_min` = 同 hour 的 `duration_min` **加权平均**  
+- **权重** `w = 1 / (days_ago + 1)`（昨天 0.5，前天 0.33…，越近权重越大）  
 - **空闲桩** `predicted_idle_piles` = `total_piles - CEIL(predicted_load / avg_power_kw)`  
-- **充电时长** `predicted_avg_duration_min` = 过去 7 天同 hour 的 `duration_min` 均值  
 - **高峰小时** `predicted_peak_hour` = `ads_station_daily.peak_hour` 或 orders 最大的 hour  
 
 Horizon：`1h` / `6h` / `24h`，每站各一行（共 站数×3 行）。

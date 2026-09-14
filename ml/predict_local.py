@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """本地预测引擎（纯 Python + SQLite，与 Spark SQL 算法一致）。
 
-算法:
-  - 负荷: 过去 N 天同 hour 的 kwh 均值
+算法（加权移动平均 WMA）:
+  - 负荷/时长: 过去 N 天同 hour 的加权平均，权重 w = 1/(days_ago+1)，近期权重更大
   - 空闲桩: total_piles - CEIL(predicted_load / avg_power_kw)
-  - 充电时长: 过去 N 天同 hour 的 duration_min 均值
   - 高峰小时: ads_station_daily.peak_hour，缺失时用 orders 最大的 hour
 
 用法:
@@ -15,7 +14,7 @@ from __future__ import annotations
 
 import math
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +28,7 @@ from common import (
     format_hour,
     now_local,
     resolve_db_path,
+    wma_weight,
 )
 
 
@@ -51,26 +51,47 @@ def fetch_station_meta(conn) -> dict[int, dict[str, float]]:
     }
 
 
-def avg_same_hour(
+def wma_same_hour(
     conn,
     station_id: int,
     stat_hour: int,
     column: str,
     *,
     positive_only: bool = False,
+    ref_date: date | None = None,
 ) -> float:
-    sql = f"""
-        SELECT AVG({column}) AS v
+    """同 hour 加权移动平均：w_i = 1 / (days_ago + 1)。"""
+    ref_date = ref_date or date.today()
+    rows = conn.execute(
+        f"""
+        SELECT stat_date, {column} AS v
         FROM ads_station_hourly
         WHERE station_id = ?
           AND stat_hour = ?
           AND stat_date >= date('now', '-{HISTORY_DAYS} day')
-    """
-    if positive_only:
-        sql += f" AND {column} > 0"
-    row = conn.execute(sql, (station_id, stat_hour)).fetchone()
-    value = row["v"] if row and row["v"] is not None else 0.0
-    return round(float(value), 2)
+        """,
+        (station_id, stat_hour),
+    ).fetchall()
+
+    weighted_sum = 0.0
+    weight_sum = 0.0
+    for row in rows:
+        value = row["v"]
+        if value is None:
+            continue
+        if positive_only and float(value) <= 0:
+            continue
+        stat_date = date.fromisoformat(str(row["stat_date"]))
+        days_ago = (ref_date - stat_date).days
+        weight = wma_weight(days_ago)
+        if weight <= 0:
+            continue
+        weighted_sum += weight * float(value)
+        weight_sum += weight
+
+    if weight_sum <= 0:
+        return 0.0
+    return round(weighted_sum / weight_sum, 2)
 
 
 def resolve_peak_hour(conn, station_id: int) -> int | None:
@@ -128,14 +149,19 @@ def run_predict(conn, now: datetime | None = None) -> tuple[list[dict[str, Any]]
             target_hour = target.hour
             forecast_hour = format_hour(target)
 
-            predicted_load = avg_same_hour(conn, station_id, target_hour, "kwh")
+            predicted_load = wma_same_hour(conn, station_id, target_hour, "kwh", ref_date=now.date())
             predicted_idle = predict_idle_piles(
                 predicted_load,
                 int(meta["total_piles"]),
                 float(meta["avg_power_kw"]),
             )
-            predicted_duration = avg_same_hour(
-                conn, station_id, target_hour, "duration_min", positive_only=True
+            predicted_duration = wma_same_hour(
+                conn,
+                station_id,
+                target_hour,
+                "duration_min",
+                positive_only=True,
+                ref_date=now.date(),
             )
 
             load_rows.append(

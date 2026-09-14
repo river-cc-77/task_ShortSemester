@@ -1,5 +1,6 @@
 -- Spark SQL 负荷预测 + 充电时间预测（仅 Spark SQL，不用 MLlib）
--- 算法: 过去 7 天同 hour 均值（与 ml/predict_local.py 一致）
+-- 算法: 加权移动平均 WMA（与 ml/predict_local.py 一致）
+--   权重 w = 1 / (days_ago + 1)，越近的历史权重越大
 --
 -- 用法:
 --   spark-sql -f ml/spark/forecast.sql \
@@ -15,26 +16,28 @@ USE charging;
 
 SET spark.sql.sources.partitionOverwriteMode=dynamic;
 
--- 历史同 hour 特征（滑动 7 天窗口，不含当天）
-CREATE OR REPLACE TEMP VIEW feat_hourly AS
+-- 近 N 天同 hour 加权移动平均
+CREATE OR REPLACE TEMP VIEW feat_wma AS
 SELECT
     station_id,
-    stat_date,
     stat_hour,
-    kwh,
-    duration_min,
-    orders,
-    AVG(kwh) OVER (
-        PARTITION BY station_id, stat_hour
-        ORDER BY stat_date
-        ROWS BETWEEN 7 PRECEDING AND 1 PRECEDING
-    ) AS avg_kwh_7d,
-    AVG(CASE WHEN duration_min > 0 THEN duration_min END) OVER (
-        PARTITION BY station_id, stat_hour
-        ORDER BY stat_date
-        ROWS BETWEEN 7 PRECEDING AND 1 PRECEDING
-    ) AS avg_duration_7d
-FROM dws_station_hourly;
+    SUM(kwh * (1.0 / (datediff(current_date(), to_date(stat_date)) + 1)))
+        / SUM(1.0 / (datediff(current_date(), to_date(stat_date)) + 1)) AS wma_kwh,
+    SUM(
+        CASE WHEN duration_min > 0
+             THEN duration_min * (1.0 / (datediff(current_date(), to_date(stat_date)) + 1))
+        END
+    ) / NULLIF(
+        SUM(
+            CASE WHEN duration_min > 0
+                 THEN 1.0 / (datediff(current_date(), to_date(stat_date)) + 1)
+            END
+        ),
+        0
+    ) AS wma_duration_min
+FROM dws_station_hourly
+WHERE datediff(current_date(), to_date(stat_date)) BETWEEN 0 AND 7
+GROUP BY station_id, stat_hour;
 
 -- 桩维度
 CREATE OR REPLACE TEMP VIEW dim_pile_agg AS
@@ -79,40 +82,23 @@ UNION ALL
 SELECT '24h', date_format(from_unixtime(unix_timestamp('${run_ts}') + 24 * 3600), 'yyyy-MM-dd HH:00'),
        hour(from_unixtime(unix_timestamp('${run_ts}') + 24 * 3600));
 
--- 各站各 horizon 的最近同 hour 均值（无窗口时用全局同 hour 均值兜底）
-CREATE OR REPLACE TEMP VIEW feat_latest AS
-SELECT
-    h.station_id,
-    h.stat_hour,
-    COALESCE(
-        MAX(CASE WHEN h.avg_kwh_7d IS NOT NULL THEN h.avg_kwh_7d END),
-        AVG(h.kwh)
-    ) AS predicted_load,
-    COALESCE(
-        MAX(CASE WHEN h.avg_duration_7d IS NOT NULL THEN h.avg_duration_7d END),
-        AVG(CASE WHEN h.duration_min > 0 THEN h.duration_min END),
-        0
-    ) AS predicted_avg_duration_min
-FROM feat_hourly h
-GROUP BY h.station_id, h.stat_hour;
-
 CREATE OR REPLACE TABLE ads_load_forecast_result
 USING parquet
 LOCATION '/charging/ads/load_forecast_result'
 AS
 SELECT
-    f.station_id,
+    s.id AS station_id,
     t.forecast_hour,
-    ROUND(COALESCE(f.predicted_load, 0), 2) AS predicted_load,
+    ROUND(COALESCE(w.wma_kwh, 0), 2) AS predicted_load,
     GREATEST(
         0,
-        CAST(p.total_piles AS INT) - CAST(CEIL(COALESCE(f.predicted_load, 0) / NULLIF(p.avg_power_kw, 0)) AS INT)
+        CAST(p.total_piles AS INT) - CAST(CEIL(COALESCE(w.wma_kwh, 0) / NULLIF(p.avg_power_kw, 0)) AS INT)
     ) AS predicted_idle_piles,
     t.horizon,
     date_format(current_timestamp(), 'yyyy-MM-dd HH:mm:ss') AS created_at
 FROM dim_station s
 CROSS JOIN horizon_targets t
-LEFT JOIN feat_latest f ON f.station_id = s.id AND f.stat_hour = t.target_hour
+LEFT JOIN feat_wma w ON w.station_id = s.id AND w.stat_hour = t.target_hour
 LEFT JOIN dim_pile_agg p ON p.station_id = s.id;
 
 CREATE OR REPLACE TABLE ads_time_forecast_result
@@ -120,13 +106,13 @@ USING parquet
 LOCATION '/charging/ads/time_forecast_result'
 AS
 SELECT
-    f.station_id,
+    s.id AS station_id,
     t.forecast_hour,
-    ROUND(COALESCE(f.predicted_avg_duration_min, 0), 2) AS predicted_avg_duration_min,
+    ROUND(COALESCE(w.wma_duration_min, 0), 2) AS predicted_avg_duration_min,
     pk.predicted_peak_hour,
     t.horizon,
     date_format(current_timestamp(), 'yyyy-MM-dd HH:mm:ss') AS created_at
 FROM dim_station s
 CROSS JOIN horizon_targets t
-LEFT JOIN feat_latest f ON f.station_id = s.id AND f.stat_hour = t.target_hour
+LEFT JOIN feat_wma w ON w.station_id = s.id AND w.stat_hour = t.target_hour
 LEFT JOIN feat_peak pk ON pk.station_id = s.id;
