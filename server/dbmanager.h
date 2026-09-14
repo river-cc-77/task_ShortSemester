@@ -82,6 +82,7 @@ public:
                     double kwh, double amount);
     void cancelExpiredReservations();
     bool cancelReservation(const QString &orderNo, int userId);
+    QJsonArray fetchChargingOrders();
 
     // ===== 统计 =====
     QJsonObject fetchStatsOverview(int days);

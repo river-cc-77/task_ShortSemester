@@ -69,11 +69,12 @@ cd .. && bash ml/run_pipeline.sh   # 导出 + predict_local
 
 `bootstrap_ads.py` 仅作**无法编译 collector 时的应急**（产出 `ads_station_*` + `ads_daily_stats`），**验收/demo 请一律用 ads-collector**。Windows 开发可 `python ml/run_pipeline.py --generate 3000` 自动走 bootstrap。
 
-## 算法（加权移动平均 WMA）
+## 算法（加权移动平均 WMA + 特征修正）
 
-- **负荷** `predicted_load` = 过去 7 天同 `stat_hour` 的 `kwh` **加权平均**  
-- **充电时长** `predicted_avg_duration_min` = 同 hour 的 `duration_min` **加权平均**  
+- **负荷** `predicted_load` = 过去 7 天同 `stat_hour` 的 `kwh` **加权平均** × **天气/节假日/周末修正**（`ml/features.py`）  
+- **充电时长** `predicted_avg_duration_min` = 同 hour 的 `duration_min` **加权平均** × 天气/节假日修正  
 - **权重** `w = 1 / (days_ago + 1)`（昨天 0.5，前天 0.33…，越近权重越大）  
+- **节假日** 2026 静态法定假日表；**天气** 按日期+小时生成稳定伪因子（无外部 API 依赖）  
 - **空闲桩** `predicted_idle_piles` = `total_piles - CEIL(predicted_load / avg_power_kw)`  
 - **高峰小时** `predicted_peak_hour` = `ads_station_daily.peak_hour` 或 orders 最大的 hour  
 

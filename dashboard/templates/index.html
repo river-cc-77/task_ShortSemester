@@ -76,7 +76,9 @@
     <div class="panel"><h2>电桩状态分布</h2><div id="pileChart" class="chart"></div></div>
     <div class="panel"><h2>充电高峰曲线（平台 × 小时）</h2><div id="hourlyChart" class="chart"></div></div>
     <div class="panel"><h2>电站排行（最近一日营收）</h2><div id="rankChart" class="chart"></div></div>
-    <div class="panel full"><h2>各站负荷预测（1h / 6h / 24h）</h2><div id="loadChart" class="chart tall"></div></div>
+    <div class="panel"><h2>近30天 24小时历史充电量分布</h2><div id="historyHourChart" class="chart"></div></div>
+    <div class="panel"><h2>工作日 vs 周末充电对比</h2><div id="weekdayChart" class="chart"></div></div>
+    <div class="panel full"><h2>各站负荷预测（1h / 6h / 24h，含天气/节假日修正）</h2><div id="loadChart" class="chart tall"></div></div>
     <div class="panel full"><h2>充电时长与高峰时段预测</h2><div id="timeChart" class="chart tall"></div></div>
   </section>
 
@@ -181,6 +183,43 @@
       });
     }
 
+    function renderHistoryHourly(data) {
+      const hours = Array.from({ length: 24 }, (_, i) => i);
+      const kwhByHour = hours.map(h => {
+        const row = data.find(r => Number(r.stat_hour) === h);
+        return row ? Number(row.kwh) : 0;
+      });
+      const chart = echarts.init(document.getElementById('historyHourChart'));
+      chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        grid: { left: 48, right: 20, top: 30, bottom: 30 },
+        xAxis: { type: 'category', data: hours.map(h => h + ':00'), axisLabel: { color: '#94a3b8' } },
+        yAxis: { type: 'value', name: 'kWh', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1f2937' } } },
+        series: [{ name: '历史充电量', type: 'bar', data: kwhByHour, color: '#38bdf8' }]
+      });
+    }
+
+    function renderWeekdayWeekend(data) {
+      const chart = echarts.init(document.getElementById('weekdayChart'));
+      const labels = data.map(r => r.label || r.day_type);
+      chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['电量 kWh', '订单数'], textStyle: { color: '#cbd5e1' } },
+        grid: { left: 48, right: 20, top: 40, bottom: 30 },
+        xAxis: { type: 'category', data: labels, axisLabel: { color: '#94a3b8' } },
+        yAxis: [
+          { type: 'value', name: 'kWh', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1f2937' } } },
+          { type: 'value', name: '单', axisLabel: { color: '#94a3b8' }, splitLine: { show: false } }
+        ],
+        series: [
+          { name: '电量 kWh', type: 'bar', data: data.map(r => r.kwh), color: '#6366f1' },
+          { name: '订单数', type: 'line', yAxisIndex: 1, data: data.map(r => r.orders), color: '#f97316' }
+        ]
+      });
+    }
+
     function renderTimeForecast(data) {
       const chart = echarts.init(document.getElementById('timeChart'));
       const items = data.filter(r => r.horizon === '1h');
@@ -203,7 +242,7 @@
 
     async function loadAll() {
       try {
-        const [kpi, revenue, pile, hourly, rank, load, time] = await Promise.all([
+        const [kpi, revenue, pile, hourly, rank, load, time, historyHour, weekday] = await Promise.all([
           fetchJson('/api/kpi'),
           fetchJson('/api/revenue_trend'),
           fetchJson('/api/pile_status'),
@@ -211,12 +250,16 @@
           fetchJson('/api/station_rank'),
           fetchJson('/api/load_forecast'),
           fetchJson('/api/time_forecast'),
+          fetchJson('/api/hourly_history'),
+          fetchJson('/api/weekday_weekend'),
         ]);
         renderKpi(kpi);
         renderRevenue(revenue);
         renderPileStatus(pile);
         renderHourly(hourly);
         renderRank(rank);
+        renderHistoryHourly(historyHour);
+        renderWeekdayWeekend(weekday);
         renderLoadForecast(load);
         renderTimeForecast(time);
       } catch (e) {

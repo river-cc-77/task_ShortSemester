@@ -82,6 +82,14 @@ QJsonObject Protocol::makeError(const QString &id, const QString &code, const QS
     return response;
 }
 
+QJsonObject Protocol::makePush(const QJsonObject &data)
+{
+    QJsonObject response;
+    response["cmd"] = QStringLiteral("event.push");
+    response["data"] = data;
+    return response;
+}
+
 QJsonObject Protocol::handleRequest(const QJsonObject &request)
 {
     const QString id = request.value("id").toString();

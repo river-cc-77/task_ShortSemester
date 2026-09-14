@@ -985,6 +985,48 @@ std::optional<QJsonObject> DbManager::findOrderByNo(const QString &orderNo)
     return order;
 }
 
+QJsonArray DbManager::fetchChargingOrders()
+{
+    QJsonArray items;
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT o.id, o.order_no, o.user_id, o.station_id, o.pile_id, o.status, "
+        "o.reserve_at, o.start_at, o.end_at, o.kwh, o.amount, "
+        "s.name AS station_name, p.pile_no, "
+        "COALESCE(o.bill_power_kw, p.power_kw) AS power_kw, "
+        "COALESCE(o.bill_price, s.price) AS price "
+        "FROM charge_order o "
+        "JOIN station s ON o.station_id = s.id "
+        "JOIN pile p ON o.pile_id = p.id "
+        "WHERE o.status = '充电中' "
+        "ORDER BY o.id");
+    if (!query.exec()) {
+        qWarning() << "fetchChargingOrders failed:" << query.lastError().text();
+        return items;
+    }
+
+    while (query.next()) {
+        QJsonObject order;
+        order["order_id"] = query.value("id").toInt();
+        order["order_no"] = query.value("order_no").toString();
+        order["user_id"] = query.value("user_id").toInt();
+        order["station_id"] = query.value("station_id").toInt();
+        order["pile_id"] = query.value("pile_id").toInt();
+        order["status"] = query.value("status").toString();
+        order["reserve_at"] = query.value("reserve_at").toString();
+        order["start_at"] = query.value("start_at").toString();
+        order["end_at"] = query.value("end_at").toString();
+        order["kwh"] = query.value("kwh").toDouble();
+        order["amount"] = query.value("amount").toDouble();
+        order["station_name"] = query.value("station_name").toString();
+        order["pile_no"] = query.value("pile_no").toString();
+        order["power_kw"] = query.value("power_kw").toDouble();
+        order["price"] = query.value("price").toDouble();
+        items.append(order);
+    }
+    return items;
+}
+
 QString DbManager::createOrder(int userId, int stationId, int pileId)
 {
     // 生成订单号：CD + YYYYMMDD + 3位序号

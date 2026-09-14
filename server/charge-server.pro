@@ -9,6 +9,8 @@ SOURCES += \
     main.cpp \
     tcpserver.cpp \
     clienthandler.cpp \
+    sessionregistry.cpp \
+    eventpusher.cpp \
     protocol.cpp \
     authmanager.cpp \
     dbmanager.cpp \
@@ -23,6 +25,8 @@ SOURCES += \
 HEADERS += \
     tcpserver.h \
     clienthandler.h \
+    sessionregistry.h \
+    eventpusher.h \
     protocol.h \
     authmanager.h \
     dbmanager.h \

@@ -30,6 +30,7 @@ from common import (
     resolve_db_path,
     wma_weight,
 )
+from features import duration_adjustment_factor, feature_tags, load_adjustment_factor
 
 
 def fetch_station_meta(conn) -> dict[int, dict[str, float]]:
@@ -149,13 +150,15 @@ def run_predict(conn, now: datetime | None = None) -> tuple[list[dict[str, Any]]
             target_hour = target.hour
             forecast_hour = format_hour(target)
 
-            predicted_load = wma_same_hour(conn, station_id, target_hour, "kwh", ref_date=now.date())
+            base_load = wma_same_hour(conn, station_id, target_hour, "kwh", ref_date=now.date())
+            load_factor = load_adjustment_factor(target)
+            predicted_load = round(base_load * load_factor, 2)
             predicted_idle = predict_idle_piles(
                 predicted_load,
                 int(meta["total_piles"]),
                 float(meta["avg_power_kw"]),
             )
-            predicted_duration = wma_same_hour(
+            base_duration = wma_same_hour(
                 conn,
                 station_id,
                 target_hour,
@@ -163,6 +166,8 @@ def run_predict(conn, now: datetime | None = None) -> tuple[list[dict[str, Any]]
                 positive_only=True,
                 ref_date=now.date(),
             )
+            predicted_duration = round(base_duration * duration_adjustment_factor(target), 2)
+            _ = feature_tags(target)  # 天气/节假日特征已融入 predicted_* 数值
 
             load_rows.append(
                 {
@@ -245,6 +250,7 @@ def main() -> int:
     conn.close()
 
     print(f"预测完成: load_forecast {len(load_rows)} 行, time_forecast {len(time_rows)} 行 -> {db_path}")
+    print("已应用天气/节假日/周末修正因子（见 ml/features.py）")
     return 0
 
 

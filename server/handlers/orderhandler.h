@@ -1,6 +1,7 @@
 #ifndef ORDERHANDLER_H
 #define ORDERHANDLER_H
 
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
 
@@ -43,6 +44,11 @@ public:
 
     // 管理员代结算（order.admin.settle，协议 4.18）
     static QJsonObject adminSettle(const QString &id, const QString &token, const QJsonObject &data);
+
+    /** event.push：所有「充电中」订单（含 user_id）。 */
+    static QJsonArray activeChargingOrders();
+    /** 由订单行构造 charge.progress 数据体。 */
+    static QJsonObject buildProgressPayload(const QJsonObject &order);
 };
 
 #endif // ORDERHANDLER_H

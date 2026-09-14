@@ -169,6 +169,14 @@ qmake6 charge-admin.pro && make -j4
 
 运行前须重建库并跑 collector：`collector/README.md`
 
+### 自动化（`tools/test_event_push.py`）
+
+| 类别 | 覆盖内容 |
+|------|----------|
+| event.push | 长连接绑定用户后收到 `charge.progress` 推送 |
+
+运行前：重编 `charge-server` 并启动。
+
 ### 自动化（`tools/test_dashboard.py`）
 
 | 类别 | 覆盖内容 |

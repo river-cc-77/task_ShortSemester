@@ -23,6 +23,8 @@ ENDPOINTS = (
     "/api/station_rank",
     "/api/load_forecast",
     "/api/time_forecast",
+    "/api/hourly_history",
+    "/api/weekday_weekend",
 )
 
 

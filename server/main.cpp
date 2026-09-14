@@ -1,4 +1,5 @@
 #include "dbmanager.h"
+#include "eventpusher.h"
 #include "tcpserver.h"
 
 #include <QCoreApplication>
@@ -20,6 +21,9 @@ int main(int argc, char *argv[])
     if (!server.start(9000)) {
         return 1;
     }
+
+    EventPusher eventPusher;
+    qInfo() << "Event push enabled (charge.progress every 3s for online sessions)";
 
     return app.exec();
 }

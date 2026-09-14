@@ -1523,21 +1523,20 @@ void MainWindow::showChargingProgress(const QString &orderNo)
     lay->addWidget(statusLabel);
     lay->addWidget(stopBtn);
 
-    QTimer *timer = new QTimer(&dlg);
+    if (!m_api->beginPersistentSession()) {
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("无法建立长连接，请确认 charge-server 已启动"));
+        return;
+    }
 
-    // 刷新进度的 lambda
-    auto refresh = [&]() {
-        QJsonObject data;
-        data["order_no"] = orderNo;
-        const QJsonObject resp = m_api->call(QStringLiteral("charge.progress"), data);
-        if (!resp.value(QStringLiteral("ok")).toBool()) {
-            statusLabel->setText(QStringLiteral("状态：刷新失败，请检查网络"));
-            return;
-        }
-        const QJsonObject d = resp.value(QStringLiteral("data")).toObject();
+    QTimer *timer = new QTimer(&dlg);
+    QTimer *pushTimer = new QTimer(&dlg);
+
+    auto applyProgress = [&](const QJsonObject &d, bool fromPush) {
         const QString orderStatus = d.value(QStringLiteral("status")).toString();
         if (orderStatus != QStringLiteral("充电中")) {
             timer->stop();
+            pushTimer->stop();
             dlg.accept();
             if (orderStatus == QStringLiteral("待支付")) {
                 showSettleDialog(orderNo,
@@ -1563,32 +1562,60 @@ void MainWindow::showChargingProgress(const QString &orderNo)
             ? QStringLiteral("预估剩余：%1").arg(formatDurationSeconds(remain))
             : QStringLiteral("预估剩余：--"));
         amountLabel->setText(QStringLiteral("累计费用：%1 元").arg(amount, 0, 'f', 2));
-        statusLabel->setText(QStringLiteral("状态：%1（实时刷新中…）")
-                                 .arg(d.value(QStringLiteral("status")).toString()));
+        statusLabel->setText(fromPush
+            ? QStringLiteral("状态：%1（服务端 event.push 推送中…）").arg(orderStatus)
+            : QStringLiteral("状态：%1（轮询刷新中…）").arg(orderStatus));
     };
 
-    refresh();  // 立即刷一次
+    m_api->setEventHandler([&](const QJsonObject &eventData) {
+        if (eventData.value(QStringLiteral("type")).toString() != QStringLiteral("charge.progress")) {
+            return;
+        }
+        const QJsonObject payload = eventData.value(QStringLiteral("payload")).toObject();
+        if (payload.value(QStringLiteral("order_no")).toString() != orderNo) {
+            return;
+        }
+        applyProgress(payload, true);
+    });
+
+    auto refresh = [&]() {
+        QJsonObject data;
+        data["order_no"] = orderNo;
+        const QJsonObject resp = m_api->callPersistent(QStringLiteral("charge.progress"), data);
+        if (!resp.value(QStringLiteral("ok")).toBool()) {
+            statusLabel->setText(QStringLiteral("状态：刷新失败，请检查网络"));
+            return;
+        }
+        applyProgress(resp.value(QStringLiteral("data")).toObject(), false);
+    };
+
+    refresh();
 
     connect(timer, &QTimer::timeout, &dlg, refresh);
-    timer->start(2000);
+    timer->start(5000);
+    connect(pushTimer, &QTimer::timeout, &dlg, [this]() { m_api->pollIncomingEvents(); });
+    pushTimer->start(500);
 
     // 停止充电
     connect(stopBtn, &QPushButton::clicked, &dlg, [&]() {
         timer->stop();
+        pushTimer->stop();
         const auto ret = QMessageBox::question(&dlg, QStringLiteral("确认"),
             QStringLiteral("确定要停止充电吗？"), QMessageBox::Yes | QMessageBox::No);
         if (ret != QMessageBox::Yes) {
-            timer->start(2000);
+            timer->start(5000);
+            pushTimer->start(500);
             return;
         }
         QJsonObject data;
         data["order_no"] = orderNo;
-        const QJsonObject resp = m_api->call(QStringLiteral("charge.stop"), data);
+        const QJsonObject resp = m_api->callPersistent(QStringLiteral("charge.stop"), data);
         if (!resp.value(QStringLiteral("ok")).toBool()) {
             const QJsonObject err = resp.value(QStringLiteral("error")).toObject();
             QMessageBox::warning(&dlg, QStringLiteral("停止失败"),
                                  err.value(QStringLiteral("message")).toString());
-            timer->start(2000);
+            timer->start(5000);
+            pushTimer->start(500);
             return;
         }
         const double kwh = resp.value(QStringLiteral("data")).toObject()
@@ -1600,6 +1627,7 @@ void MainWindow::showChargingProgress(const QString &orderNo)
     });
 
     dlg.exec();
+    m_api->endPersistentSession();
 }
 
 void MainWindow::showSettleDialog(const QString &orderNo, double kwh, double amount)

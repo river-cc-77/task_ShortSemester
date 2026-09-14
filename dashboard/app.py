@@ -160,6 +160,60 @@ def api_station_rank():
     return jsonify(rows_to_dicts(rows))
 
 
+@app.route("/api/hourly_history")
+def api_hourly_history():
+    """近 30 天按小时聚合的历史充电量分布。"""
+    conn = connect()
+    rows = conn.execute(
+        """
+        SELECT stat_hour, SUM(kwh) AS kwh, SUM(orders) AS orders
+        FROM ads_hourly_stats
+        WHERE stat_date >= date('now', '-30 day')
+        GROUP BY stat_hour
+        ORDER BY stat_hour
+        """
+    ).fetchall()
+    if not rows:
+        rows = conn.execute(
+            """
+            SELECT stat_hour, SUM(kwh) AS kwh, SUM(orders) AS orders
+            FROM ads_station_hourly
+            WHERE stat_date >= date('now', '-30 day')
+            GROUP BY stat_hour
+            ORDER BY stat_hour
+            """
+        ).fetchall()
+    conn.close()
+    return jsonify(rows_to_dicts(rows))
+
+
+@app.route("/api/weekday_weekend")
+def api_weekday_weekend():
+    """工作日 vs 周末充电对比（近 30 天）。"""
+    conn = connect()
+    rows = conn.execute(
+        """
+        SELECT
+            CASE
+                WHEN CAST(strftime('%w', stat_date) AS INTEGER) IN (0, 6) THEN 'weekend'
+                ELSE 'weekday'
+            END AS day_type,
+            SUM(total_kwh) AS kwh,
+            SUM(order_count) AS orders,
+            SUM(total_revenue) AS revenue
+        FROM ads_daily_stats
+        WHERE stat_date >= date('now', '-30 day')
+        GROUP BY day_type
+        """
+    ).fetchall()
+    conn.close()
+    data = rows_to_dicts(rows)
+    label_map = {"weekday": "工作日", "weekend": "周末"}
+    for row in data:
+        row["label"] = label_map.get(row.get("day_type"), row.get("day_type"))
+    return jsonify(data)
+
+
 @app.route("/api/pile_status")
 def api_pile_status():
     conn = connect()

@@ -12,6 +12,7 @@ public:
 
     static QJsonObject makeSuccess(const QString &id, const QJsonObject &data);
     static QJsonObject makeError(const QString &id, const QString &code, const QString &message);
+    static QJsonObject makePush(const QJsonObject &data);
 
     static QJsonObject handleRequest(const QJsonObject &request);
 };
