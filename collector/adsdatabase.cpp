@@ -14,6 +14,19 @@ AdsDatabase &AdsDatabase::instance()
     return database;
 }
 
+namespace {
+
+bool looksLikeSqliteFile(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    return file.read(16).startsWith("SQLite format 3");
+}
+
+} // namespace
+
 QString AdsDatabase::resolveDatabasePath() const
 {
     // 允许用环境变量显式指定，便于部署与测试
@@ -32,9 +45,14 @@ QString AdsDatabase::resolveDatabasePath() const
     };
 
     for (const QString &path : candidates) {
-        if (QFile::exists(path)) {
-            return QDir(path).canonicalPath();
+        if (!QFile::exists(path)) {
+            continue;
         }
+        const QString canonical = QDir(path).canonicalPath();
+        if (looksLikeSqliteFile(canonical)) {
+            return canonical;
+        }
+        qWarning() << "Skip non-SQLite file:" << canonical;
     }
 
     return QDir(QDir::currentPath()).filePath("db/charge.db");
@@ -52,6 +70,20 @@ bool AdsDatabase::open()
 
     if (!m_db.open()) {
         qCritical() << "Failed to open database:" << m_dbPath << m_db.lastError().text();
+        return false;
+    }
+
+    QSqlQuery sanity(m_db);
+    if (!sanity.exec(QStringLiteral("SELECT name FROM sqlite_master WHERE type='table' AND name='station'"))
+        || !sanity.next()) {
+        qCritical() << "Database is not initialized or corrupted:" << m_dbPath;
+        if (sanity.lastError().isValid()) {
+            qCritical() << sanity.lastError().text();
+        }
+        qCritical() << "Rebuild with:";
+        qCritical() << "  cd db && rm -f charge.db charge.db-wal charge.db-shm";
+        qCritical() << "  sqlite3 charge.db < schema.sql && sqlite3 charge.db < seed.sql";
+        m_db.close();
         return false;
     }
 
