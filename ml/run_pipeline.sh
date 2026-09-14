@@ -36,8 +36,24 @@ if [[ "$HOURLY" == "0" ]]; then
         echo "    cd collector && qmake6 collector.pro && make -j4"
         exit 1
     fi
-    echo ">>> 运行 ads-collector（回填近 30 天 ads_*）..."
-    (cd collector && ./ads-collector)
+    echo ">>> 运行 ads-collector（首轮回填后自动结束，约 10~60 秒）..."
+    (cd collector && ./ads-collector) &
+    COL_PID=$!
+    for _ in $(seq 1 180); do
+        HOURLY=$(sqlite3 db/charge.db "SELECT COUNT(*) FROM ads_station_hourly;" 2>/dev/null || echo 0)
+        if [[ "$HOURLY" != "0" ]]; then
+            kill "$COL_PID" 2>/dev/null || true
+            wait "$COL_PID" 2>/dev/null || true
+            echo "    ads_station_hourly 已有 ${HOURLY} 行，collector 已停止"
+            break
+        fi
+        sleep 1
+    done
+    if [[ "$HOURLY" == "0" ]]; then
+        kill "$COL_PID" 2>/dev/null || true
+        echo "[!] collector 超时（180s）或失败，请手动: cd collector && ./ads-collector"
+        exit 1
+    fi
 fi
 
 # 3. 导出到 HDFS 镜像（本地 ml/data/hdfs/，可选上传真实 HDFS）

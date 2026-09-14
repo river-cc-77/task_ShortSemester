@@ -44,13 +44,25 @@ def check_ads_ready() -> bool:
 
 
 def try_run_collector() -> bool:
-    """Linux 验收环境：ads_* 为空时自动跑一次 ads-collector。"""
+    """Linux 验收环境：ads_* 为空时跑 ads-collector，首轮回填完成后结束进程。"""
     if platform.system() != "Linux":
         return False
     if not (COLLECTOR_BIN.is_file() and os.access(COLLECTOR_BIN, os.X_OK)):
         return False
-    print("\n>>> ads_* 为空，运行 collector/ads-collector ...")
-    subprocess.run([str(COLLECTOR_BIN)], cwd=ROOT / "collector", check=True)
+    print("\n>>> ads_* 为空，运行 collector/ads-collector（首轮回填约 10~60s）...")
+    proc = subprocess.Popen([str(COLLECTOR_BIN)], cwd=ROOT / "collector")
+    try:
+        import time
+
+        for _ in range(180):
+            if check_ads_ready():
+                proc.terminate()
+                proc.wait(timeout=5)
+                return True
+            time.sleep(1)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
     return check_ads_ready()
 
 
