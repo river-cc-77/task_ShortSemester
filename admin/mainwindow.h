@@ -106,7 +106,6 @@ private:
     QTableWidget *m_tableForecast = nullptr;
     QComboBox *m_comboForecastHorizon = nullptr;
     QWidget *m_pageDashboard = nullptr;
-    QLabel *m_labDashboardHint = nullptr;
 #ifdef CHARGE_USE_WEBENGINE
     QWebEngineView *m_webDashboard = nullptr;
 #endif
