@@ -64,15 +64,27 @@ if [[ "$SKIP_EXPORT" == "0" ]]; then
     fi
 fi
 
-# 4. 预测
+# 4. PySpark 清洗 + 多维分析（第二阶段，本地无 Hadoop 时读 CSV 镜像）
+if python3 -c "import pyspark" 2>/dev/null; then
+    python3 ml/pyspark_clean.py || echo "[!] pyspark_clean 失败，继续..."
+    python3 ml/pyspark_analytics.py || echo "[!] pyspark_analytics 失败，继续..."
+else
+    echo "[!] 未安装 pyspark，跳过 PySpark 步骤（pip install pyspark）"
+fi
+
+# 5. 预测
 if [[ "$USE_SPARK" == "1" ]]; then
     RUN_TS="$(date '+%Y-%m-%d %H:00:00')"
     spark-sql -f ml/spark/forecast.sql --hiveconf "run_ts=${RUN_TS}"
+    spark-sql -f ml/spark/analytics.sql
     # 需先将 Spark 结果导出为 ml/output/*.csv，再:
     python3 ml/sync_to_sqlite.py
 else
     python3 ml/predict_local.py
 fi
+
+# 6. 模型评估
+python3 ml/evaluate.py || echo "[!] evaluate 失败，继续..."
 
 python3 ml/verify.py
 echo "完成。启动 charge-server 后可测 forecast.list / timeforecast.list"

@@ -58,13 +58,18 @@ cd .. && bash ml/run_pipeline.sh   # 导出 + predict_local
 
 | 脚本 | 作用 |
 |------|------|
-| `run_pipeline.sh` | **Linux 主入口**：检测 ads → collector → 导出 → 预测 → verify |
+| `run_pipeline.sh` | **Linux 主入口**：检测 ads → collector → 导出 → PySpark → 预测 → 评估 → verify |
+| `run_pipeline.py` | Python 入口（Windows 可用 `--bootstrap-ads`） |
 | `generate_orders.py` | 批量插入模拟「已完成」订单 |
 | `export_to_hdfs.py` | 导出 ads 表 CSV；`HDFS_URI=hdfs://… --upload` 上传 HDFS |
+| `pyspark_clean.py` | PySpark 清洗 hourly 数据 |
+| `pyspark_analytics.py` | PySpark 10 维分析 + 2 交叉对比 |
 | `predict_local.py` | 与 Spark SQL 同算法，写 SQLite + `ml/output/*.csv` |
+| `evaluate.py` | WMA 留一日验证，输出 MAE/RMSE/MAPE → `ml/output/evaluation.json` |
 | `sync_to_sqlite.py` | Spark 产出 CSV 回写 SQLite |
 | `hive/hive_ddl.sql` | Hive 外部表 DDL |
 | `spark/forecast.sql` | Spark SQL 预测（仅 SQL，不用 MLlib） |
+| `spark/analytics.sql` | Spark SQL 多维分析（与 PySpark 口径一致） |
 | `verify.py` | 离线校验预测表行数与字段 |
 
 `bootstrap_ads.py` 仅作**无法编译 collector 时的应急**（产出 `ads_station_*` + `ads_daily_stats`），**验收/demo 请一律用 ads-collector**。Windows 开发可 `python ml/run_pipeline.py --generate 3000` 自动走 bootstrap。

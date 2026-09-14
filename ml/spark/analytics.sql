@@ -1,5 +1,6 @@
 -- 第二阶段：Spark SQL 多维分析（≥8 个分析维度，含 ≥2 组交叉对比）
 -- 依赖 Hive 表：dws_station_hourly / dws_station_daily / dim_station / dim_pile
+-- 平台 KPI / 用户活跃由 dws_station_daily 聚合（与 hive_ddl.sql 一致，不依赖 ads_daily_stats）
 --
 -- 用法:
 --   spark-sql -f ml/spark/analytics.sql
@@ -19,11 +20,28 @@
 CREATE DATABASE IF NOT EXISTS charging;
 USE charging;
 
--- 1 平台日 KPI
+-- 1 平台日 KPI（由 dws_station_daily 聚合）
 CREATE OR REPLACE TABLE analytics_platform_daily
 USING parquet LOCATION '/charging/ads/analytics/platform_daily' AS
-SELECT stat_date, total_revenue, total_kwh, order_count, active_user_count, utilization, peak_hour
-FROM ads_daily_stats;
+SELECT
+    stat_date,
+    SUM(revenue) AS total_revenue,
+    SUM(kwh) AS total_kwh,
+    SUM(orders) AS order_count,
+    SUM(active_users) AS active_user_count,
+    AVG(utilization) AS utilization,
+    MAX(peak_hour) AS peak_hour
+FROM (
+    SELECT d.*, h.active_users
+    FROM dws_station_daily d
+    LEFT JOIN (
+        SELECT station_id, stat_date, MAX(active_users) AS active_users
+        FROM dws_station_hourly
+        GROUP BY station_id, stat_date
+    ) h ON h.station_id = d.station_id AND h.stat_date = d.stat_date
+) t
+GROUP BY stat_date
+ORDER BY stat_date;
 
 -- 2 电站排行（最近一日）
 CREATE OR REPLACE TABLE analytics_station_rank
@@ -70,11 +88,16 @@ JOIN dim_station s ON s.id = d.station_id
 WHERE datediff(current_date(), to_date(d.stat_date)) BETWEEN 0 AND 30
 GROUP BY s.name;
 
--- 7 用户活跃（按日）
+-- 7 用户活跃（按日，由 hourly 表 distinct 近似）
 CREATE OR REPLACE TABLE analytics_user_activity
 USING parquet LOCATION '/charging/ads/analytics/user_activity' AS
-SELECT stat_date, active_user_count, total_users, active_ratio
-FROM ads_daily_stats;
+SELECT
+    stat_date,
+    SUM(active_users) AS active_user_count,
+    SUM(orders) AS order_count
+FROM dws_station_hourly
+GROUP BY stat_date
+ORDER BY stat_date;
 
 -- 8 故障率趋势
 CREATE OR REPLACE TABLE analytics_fault_rate
@@ -90,10 +113,10 @@ CREATE OR REPLACE TABLE analytics_weekday_weekend
 USING parquet LOCATION '/charging/ads/analytics/weekday_weekend' AS
 SELECT
     CASE WHEN dayofweek(to_date(stat_date)) IN (1, 7) THEN 'weekend' ELSE 'weekday' END AS day_type,
-    SUM(total_kwh) AS kwh,
-    SUM(order_count) AS orders,
-    SUM(total_revenue) AS revenue
-FROM ads_daily_stats
+    SUM(kwh) AS kwh,
+    SUM(orders) AS orders,
+    SUM(revenue) AS revenue
+FROM dws_station_daily
 WHERE datediff(current_date(), to_date(stat_date)) BETWEEN 0 AND 30
 GROUP BY CASE WHEN dayofweek(to_date(stat_date)) IN (1, 7) THEN 'weekend' ELSE 'weekday' END;
 

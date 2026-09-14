@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""东软充电桩 — 数据可视化大屏（Flask + ECharts）。
+"""东软充电桩 — 数据可视化大屏（Flask API + Vue3/DataV 前端）。
 
 用法:
   pip install -r dashboard/requirements.txt
+  cd dashboard-web && npm install && npm run build   # 首次构建 Vue 大屏
   python3 dashboard/app.py
 
 环境变量:
@@ -12,23 +13,39 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime
 
 import sys
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, send_from_directory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db import connect, rows_to_dicts
+
+DASH_DIR = Path(__file__).resolve().parent
+DIST_DIR = DASH_DIR / "static" / "dist"
+ML_OUTPUT = DASH_DIR.parent / "ml" / "output"
 
 app = Flask(__name__)
 
 
 @app.route("/")
 def index():
+    vue_index = DIST_DIR / "index.html"
+    if vue_index.is_file():
+        return send_from_directory(DIST_DIR, "index.html")
     return render_template("index.html")
+
+
+@app.route("/assets/<path:filename>")
+def vue_assets(filename: str):
+    assets_dir = DIST_DIR / "assets"
+    if assets_dir.is_dir():
+        return send_from_directory(assets_dir, filename)
+    return ("", 404)
 
 
 @app.route("/api/kpi")
@@ -226,6 +243,86 @@ def api_pile_status():
     ).fetchall()
     conn.close()
     return jsonify(rows_to_dicts(rows))
+
+
+@app.route("/api/station_util")
+def api_station_util():
+    """各站近 30 日平均利用率（雷达图）。"""
+    conn = connect()
+    rows = conn.execute(
+        """
+        SELECT s.name, AVG(d.utilization) AS avg_util, AVG(d.turnover) AS avg_turnover,
+               AVG(d.fault_rate) AS fault_rate
+        FROM ads_station_daily d
+        JOIN station s ON s.id = d.station_id
+        WHERE d.stat_date >= date('now', '-30 day')
+        GROUP BY s.id, s.name
+        ORDER BY avg_util DESC
+        LIMIT 8
+        """
+    ).fetchall()
+    conn.close()
+    return jsonify(rows_to_dicts(rows))
+
+
+@app.route("/api/region_stats")
+def api_region_stats():
+    """区域分布（从地址提取区名）。"""
+    conn = connect()
+    rows = conn.execute(
+        """
+        SELECT
+            CASE
+                WHEN instr(s.address, '区') > 0
+                THEN substr(s.address, 1, instr(s.address, '区'))
+                ELSE '其他'
+            END AS region,
+            SUM(d.orders) AS orders,
+            SUM(d.revenue) AS revenue,
+            SUM(d.kwh) AS kwh
+        FROM ads_station_daily d
+        JOIN station s ON s.id = d.station_id
+        WHERE d.stat_date >= date('now', '-30 day')
+        GROUP BY region
+        ORDER BY revenue DESC
+        """
+    ).fetchall()
+    conn.close()
+    return jsonify(rows_to_dicts(rows))
+
+
+@app.route("/api/station_hour_matrix")
+def api_station_hour_matrix():
+    """交叉对比：电站 × 小时热力矩阵。"""
+    conn = connect()
+    rows = conn.execute(
+        """
+        SELECT s.name AS station_name, h.stat_hour, SUM(h.kwh) AS kwh, SUM(h.orders) AS orders
+        FROM ads_station_hourly h
+        JOIN station s ON s.id = h.station_id
+        WHERE h.stat_date >= date('now', '-30 day')
+        GROUP BY s.name, h.stat_hour
+        ORDER BY s.name, h.stat_hour
+        """
+    ).fetchall()
+    conn.close()
+    return jsonify(rows_to_dicts(rows))
+
+
+@app.route("/api/ml_evaluation")
+def api_ml_evaluation():
+    """WMA 模型离线评估指标（ml/evaluate.py 产出）。"""
+    path = ML_OUTPUT / "evaluation.json"
+    if path.is_file():
+        return jsonify(json.loads(path.read_text(encoding="utf-8")))
+    return jsonify(
+        {
+            "model": "WMA",
+            "message": "尚未评估，请运行: python ml/evaluate.py",
+            "load_kwh": {"mae": None, "rmse": None, "mape_pct": None},
+            "duration_min": {"mae": None, "rmse": None, "mape_pct": None},
+        }
+    )
 
 
 if __name__ == "__main__":

@@ -5,12 +5,15 @@
   1. （可选）生成模拟订单
   2. 提醒/检测 ads_* 是否就绪
   3. 导出到 HDFS 镜像
-  4. 本地 Spark SQL 等价预测（predict_local）并写回 SQLite
+  4. PySpark 清洗 + 多维分析（第二阶段）
+  5. 本地 Spark SQL 等价预测（predict_local）并写回 SQLite
+  6. 模型离线评估（MAE/RMSE/MAPE）
 
 用法:
   python ml/run_pipeline.py
   python ml/run_pipeline.py --generate 3000
   python ml/run_pipeline.py --skip-export
+  python ml/run_pipeline.py --skip-pyspark
 """
 
 from __future__ import annotations
@@ -75,6 +78,8 @@ def main() -> int:
         action="store_true",
         help="[仅应急] 跳过 collector，用 Python 最小聚合（勿在验收环境使用）",
     )
+    parser.add_argument("--skip-pyspark", action="store_true", help="跳过 PySpark 清洗/分析")
+    parser.add_argument("--skip-evaluate", action="store_true", help="跳过模型离线评估")
     args = parser.parse_args()
 
     db_path = resolve_db_path()
@@ -100,7 +105,19 @@ def main() -> int:
     if not args.skip_export:
         run_py("export_to_hdfs.py", "--clean")
 
+    if not args.skip_pyspark:
+        try:
+            run_py("pyspark_clean.py")
+            run_py("pyspark_analytics.py")
+        except subprocess.CalledProcessError as exc:
+            print(f"\n[!] PySpark 步骤失败（需 pip install pyspark）: {exc}", file=sys.stderr)
+            print("    可稍后单独运行: python ml/pyspark_analytics.py", file=sys.stderr)
+            print("    或加 --skip-pyspark 跳过", file=sys.stderr)
+
     run_py("predict_local.py")
+
+    if not args.skip_evaluate:
+        run_py("evaluate.py")
 
     conn = connect_db()
     load_cnt = conn.execute("SELECT COUNT(*) FROM load_forecast").fetchone()[0]
