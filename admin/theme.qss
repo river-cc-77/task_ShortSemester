@@ -344,7 +344,7 @@ QLabel#sidebarVersion {
 /* 侧边导航按钮（左侧 3px 光条占位，选中时点亮，文字不跳动） */
 QPushButton#btnOverview, QPushButton#btnPile, QPushButton#btnStation,
 QPushButton#btnUser, QPushButton#btnOrder, QPushButton#btnAnnouncement,
-QPushButton#btnLog {
+QPushButton#btnLog, QPushButton#btnForecast, QPushButton#btnDashboard {
     background: transparent;
     border: none;
     border-left: 3px solid transparent;
@@ -357,7 +357,7 @@ QPushButton#btnLog {
 
 QPushButton#btnOverview:hover, QPushButton#btnPile:hover, QPushButton#btnStation:hover,
 QPushButton#btnUser:hover, QPushButton#btnOrder:hover, QPushButton#btnAnnouncement:hover,
-QPushButton#btnLog:hover {
+QPushButton#btnLog:hover, QPushButton#btnForecast:hover, QPushButton#btnDashboard:hover {
     background-color: rgba(255,255,255,0.07);
     color: #FFFFFF;
 }
@@ -365,7 +365,8 @@ QPushButton#btnLog:hover {
 QPushButton#btnOverview[selected="true"], QPushButton#btnPile[selected="true"],
 QPushButton#btnStation[selected="true"], QPushButton#btnUser[selected="true"],
 QPushButton#btnOrder[selected="true"], QPushButton#btnAnnouncement[selected="true"],
-QPushButton#btnLog[selected="true"] {
+QPushButton#btnLog[selected="true"], QPushButton#btnForecast[selected="true"],
+QPushButton#btnDashboard[selected="true"] {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2B6BFF, stop:1 #3D7EFF);
     border-left: 3px solid #00C6F5;
     color: #FFFFFF;
@@ -375,7 +376,8 @@ QPushButton#btnLog[selected="true"] {
 QPushButton#btnOverview[selected="true"]:hover, QPushButton#btnPile[selected="true"]:hover,
 QPushButton#btnStation[selected="true"]:hover, QPushButton#btnUser[selected="true"]:hover,
 QPushButton#btnOrder[selected="true"]:hover, QPushButton#btnAnnouncement[selected="true"]:hover,
-QPushButton#btnLog[selected="true"]:hover {
+QPushButton#btnLog[selected="true"]:hover, QPushButton#btnForecast[selected="true"]:hover,
+QPushButton#btnDashboard[selected="true"]:hover {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #336FFF, stop:1 #4F8BFF);
     border-left: 3px solid #00C6F5;
     color: #FFFFFF;

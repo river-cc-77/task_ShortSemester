@@ -184,6 +184,8 @@ MainWindow::MainWindow(ApiClient *api, const QJsonObject &admin, QWidget *parent
     ui->btnGoPileStatus->setCursor(Qt::PointingHandCursor);
     ui->btnShift->setCursor(Qt::PointingHandCursor);
     ui->btnAnnouncement->setCursor(Qt::PointingHandCursor);
+    ui->btnForecast->setCursor(Qt::PointingHandCursor);
+    ui->btnDashboard->setCursor(Qt::PointingHandCursor);
     ui->btnSearch->setText(QStringLiteral("查询"));
     ui->btnSearch->setMinimumWidth(100);
 
@@ -565,7 +567,8 @@ MainWindow::~MainWindow()
 void MainWindow::resetAllBtnSelect()
 {
     auto btns = {ui->btnOverview, ui->btnPile, ui->btnStation, ui->btnUser,
-                 ui->btnOrder, ui->btnAnnouncement, ui->btnLog, m_btnForecast, m_btnDashboard};
+                 ui->btnOrder, ui->btnAnnouncement, ui->btnLog,
+                 ui->btnForecast, ui->btnDashboard};
     for (auto btn : btns) {
         if (!btn) {
             continue;
@@ -2003,12 +2006,6 @@ void MainWindow::updatePileStatusOverview(const QJsonObject &pileStat, int pileT
 
 void MainWindow::setupForecastPage()
 {
-    m_btnForecast = new QPushButton(QStringLiteral("智能预测"), ui->sideBarWidget);
-    m_btnForecast->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_btnForecast->setCursor(Qt::PointingHandCursor);
-    const int insertIdx = ui->verticalLayout->indexOf(ui->verticalSpacer_5);
-    ui->verticalLayout->insertWidget(insertIdx, m_btnForecast);
-
     m_pageForecast = new QWidget;
     auto *pageLay = new QVBoxLayout(m_pageForecast);
     auto *toolbar = new QHBoxLayout;
@@ -2041,10 +2038,10 @@ void MainWindow::setupForecastPage()
     ui->stackedWidget->addWidget(m_pageForecast);
     const int forecastPageIndex = ui->stackedWidget->indexOf(m_pageForecast);
 
-    connect(m_btnForecast, &QPushButton::clicked, this, [=]() {
+    connect(ui->btnForecast, &QPushButton::clicked, this, [=]() {
         resetAllBtnSelect();
-        m_btnForecast->setProperty("selected", true);
-        refreshBtnStyle(m_btnForecast);
+        ui->btnForecast->setProperty("selected", true);
+        refreshBtnStyle(ui->btnForecast);
         ui->stackedWidget->setCurrentIndex(forecastPageIndex);
         reloadForecastList();
     });
@@ -2133,12 +2130,6 @@ void MainWindow::reloadDashboardView()
 
 void MainWindow::setupDashboardPage()
 {
-    m_btnDashboard = new QPushButton(QStringLiteral("数据大屏"), ui->sideBarWidget);
-    m_btnDashboard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_btnDashboard->setCursor(Qt::PointingHandCursor);
-    const int insertIdx = ui->verticalLayout->indexOf(m_btnForecast) + 1;
-    ui->verticalLayout->insertWidget(insertIdx, m_btnDashboard);
-
     m_pageDashboard = new QWidget;
     auto *pageLay = new QVBoxLayout(m_pageDashboard);
     pageLay->setContentsMargins(0, 0, 0, 0);
@@ -2191,10 +2182,10 @@ void MainWindow::setupDashboardPage()
     ui->stackedWidget->addWidget(m_pageDashboard);
     const int dashboardPageIndex = ui->stackedWidget->indexOf(m_pageDashboard);
 
-    connect(m_btnDashboard, &QPushButton::clicked, this, [=]() {
+    connect(ui->btnDashboard, &QPushButton::clicked, this, [=]() {
         resetAllBtnSelect();
-        m_btnDashboard->setProperty("selected", true);
-        refreshBtnStyle(m_btnDashboard);
+        ui->btnDashboard->setProperty("selected", true);
+        refreshBtnStyle(ui->btnDashboard);
         ui->stackedWidget->setCurrentIndex(dashboardPageIndex);
         reloadDashboardView();
     });

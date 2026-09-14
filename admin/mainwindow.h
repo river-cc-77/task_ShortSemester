@@ -102,11 +102,9 @@ private:
     QJsonArray m_logItems;
     QJsonArray m_announceItems;
     QMap<int, int> m_forecastMinIdle;
-    QPushButton *m_btnForecast = nullptr;
     QWidget *m_pageForecast = nullptr;
     QTableWidget *m_tableForecast = nullptr;
     QComboBox *m_comboForecastHorizon = nullptr;
-    QPushButton *m_btnDashboard = nullptr;
     QWidget *m_pageDashboard = nullptr;
     QLabel *m_labDashboardHint = nullptr;
 #ifdef CHARGE_USE_WEBENGINE
