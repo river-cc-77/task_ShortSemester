@@ -44,6 +44,19 @@ const kpiCards = computed(() => {
   ]
 })
 
+function kpiFlopConfig(value) {
+  const raw = String(value).replace(/,/g, '')
+  const num = Number(raw)
+  if (!Number.isFinite(num)) return null
+  return {
+    number: [num],
+    content: '{nt}',
+    toFixed: raw.includes('.') ? 2 : 0,
+    style: { fontSize: 28, fill: '#38bdf8', fontWeight: 700 },
+    textAlign: 'center',
+  }
+}
+
 const revenueOpt = computed(() => {
   const rows = data.value?.revenue_trend || []
   return {
@@ -191,8 +204,6 @@ const stationHourOpt = computed(() => {
 const radarOpt = computed(() => {
   const rows = data.value?.station_util || []
   if (!rows.length) return {}
-  // 三轴都用数据驱动刻度：利用率写死 max:1 时，实际值只有 0.13~0.15，
-  // 顶点全挤在圆心附近，四个站看起来重合（悬浮 tooltip 仍显示真实数值）
   const indicators = [
     { name: '利用率', max: Math.max(...rows.map((r) => r.avg_util || 0), 0.1) },
     { name: '周转率', max: Math.max(...rows.map((r) => r.avg_turnover || 0), 1) },
@@ -320,77 +331,114 @@ onUnmounted(() => clearInterval(timer))
 <template>
   <div class="dashboard">
     <header class="header">
-      <h1>东软电动汽车充电桩 — 智能分析大屏</h1>
+      <div class="header-title">
+        <dv-decoration-8 :reverse="true" class="header-deco" />
+        <h1>东软电动汽车充电桩 — 智能分析大屏</h1>
+        <dv-decoration-8 class="header-deco" />
+      </div>
       <div class="time">{{ error || `刷新：${updatedAt}` }}</div>
     </header>
 
+    <dv-decoration-10 class="header-line" />
+
     <section class="kpi-row">
-      <div v-for="([label, value], i) in kpiCards" :key="i" class="kpi-card">
-        <div class="kpi-label">{{ label }}</div>
-        <div class="kpi-value">{{ value }}</div>
-      </div>
+      <dv-border-box-12 v-for="([label, value], i) in kpiCards" :key="i" class="kpi-card">
+        <div class="kpi-inner">
+          <div class="kpi-label">{{ label }}</div>
+          <dv-digital-flop
+            v-if="kpiFlopConfig(value)"
+            class="kpi-flop"
+            :config="kpiFlopConfig(value)"
+          />
+          <div v-else class="kpi-value">{{ value }}</div>
+        </div>
+      </dv-border-box-12>
     </section>
 
     <section class="grid">
-      <div class="panel panel-box">
-        <div class="panel-title">近 30 日营收趋势</div>
-        <VChart class="chart" :option="revenueOpt" autoresize />
-      </div>
+      <dv-border-box-8 :dur="10" class="panel">
+        <div class="panel-inner">
+          <div class="panel-title">近 30 日营收趋势</div>
+          <VChart class="chart" :option="revenueOpt" autoresize />
+        </div>
+      </dv-border-box-8>
 
-      <div class="panel panel-box">
-        <div class="panel-title">电桩状态</div>
-        <VChart class="chart" :option="pileOpt" autoresize />
-      </div>
+      <dv-border-box-8 :dur="10" :reverse="true" class="panel">
+        <div class="panel-inner">
+          <div class="panel-title">电桩状态</div>
+          <VChart class="chart" :option="pileOpt" autoresize />
+        </div>
+      </dv-border-box-8>
 
-      <div class="panel panel-box">
-        <div class="panel-title">平台利用率</div>
-        <VChart class="chart" :option="gaugeOpt" autoresize />
-      </div>
+      <dv-border-box-8 :dur="10" class="panel">
+        <div class="panel-inner">
+          <div class="panel-title">平台利用率</div>
+          <VChart class="chart" :option="gaugeOpt" autoresize />
+        </div>
+      </dv-border-box-8>
 
-      <div class="panel panel-box wide">
-        <div class="panel-title">充电高峰曲线</div>
-        <VChart class="chart" :option="hourlyOpt" autoresize />
-      </div>
+      <dv-border-box-13 class="panel wide">
+        <div class="panel-inner">
+          <div class="panel-title">充电高峰曲线</div>
+          <VChart class="chart" :option="hourlyOpt" autoresize />
+        </div>
+      </dv-border-box-13>
 
-      <div class="panel panel-box">
-        <div class="panel-title">区域营收分布</div>
-        <VChart class="chart" :option="regionOpt" autoresize />
-      </div>
+      <dv-border-box-8 :dur="10" :reverse="true" class="panel">
+        <div class="panel-inner">
+          <div class="panel-title">区域营收分布</div>
+          <VChart class="chart" :option="regionOpt" autoresize />
+        </div>
+      </dv-border-box-8>
 
-      <div class="panel panel-box">
-        <div class="panel-title">电站排行</div>
-        <VChart class="chart" :option="rankOpt" autoresize />
-      </div>
+      <dv-border-box-8 :dur="10" class="panel">
+        <div class="panel-inner">
+          <div class="panel-title">电站排行</div>
+          <VChart class="chart" :option="rankOpt" autoresize />
+        </div>
+      </dv-border-box-8>
 
-      <div class="panel panel-box">
-        <div class="panel-title">24 小时历史分布</div>
-        <VChart class="chart" :option="historyOpt" autoresize />
-      </div>
+      <dv-border-box-8 :dur="10" :reverse="true" class="panel">
+        <div class="panel-inner">
+          <div class="panel-title">24 小时历史分布</div>
+          <VChart class="chart" :option="historyOpt" autoresize />
+        </div>
+      </dv-border-box-8>
 
-      <div class="panel panel-box wide">
-        <div class="panel-title">工作日 vs 周末</div>
-        <VChart class="chart" :option="weekdayOpt" autoresize />
-      </div>
+      <dv-border-box-13 class="panel wide">
+        <div class="panel-inner">
+          <div class="panel-title">工作日 vs 周末</div>
+          <VChart class="chart" :option="weekdayOpt" autoresize />
+        </div>
+      </dv-border-box-13>
 
-      <div class="panel panel-box full">
-        <div class="panel-title">各站 24 小时充电量</div>
-        <VChart class="chart tall" :option="stationHourOpt" autoresize />
-      </div>
+      <dv-border-box-1 class="panel full">
+        <div class="panel-inner">
+          <div class="panel-title">各站 24 小时充电量</div>
+          <VChart class="chart tall" :option="stationHourOpt" autoresize />
+        </div>
+      </dv-border-box-1>
 
-      <div class="panel panel-box">
-        <div class="panel-title">电站运营指标</div>
-        <VChart class="chart" :option="radarOpt" autoresize />
-      </div>
+      <dv-border-box-8 :dur="10" class="panel">
+        <div class="panel-inner">
+          <div class="panel-title">电站运营指标</div>
+          <VChart class="chart" :option="radarOpt" autoresize />
+        </div>
+      </dv-border-box-8>
 
-      <div class="panel panel-box wide">
-        <div class="panel-title">各站负荷预测</div>
-        <VChart class="chart" :option="loadOpt" autoresize />
-      </div>
+      <dv-border-box-13 :reverse="true" class="panel wide">
+        <div class="panel-inner">
+          <div class="panel-title">各站负荷预测</div>
+          <VChart class="chart" :option="loadOpt" autoresize />
+        </div>
+      </dv-border-box-13>
 
-      <div class="panel panel-box wide">
-        <div class="panel-title">充电时长与高峰</div>
-        <VChart class="chart" :option="timeOpt" autoresize />
-      </div>
+      <dv-border-box-13 class="panel wide">
+        <div class="panel-inner">
+          <div class="panel-title">充电时长与高峰</div>
+          <VChart class="chart" :option="timeOpt" autoresize />
+        </div>
+      </dv-border-box-13>
     </section>
   </div>
 </template>

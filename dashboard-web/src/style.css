@@ -28,7 +28,18 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px 16px;
+  padding: 8px 12px 8px;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-deco {
+  width: 200px;
+  height: 36px;
 }
 
 .header h1 {
@@ -38,11 +49,18 @@ body {
   background: linear-gradient(90deg, #38bdf8, #818cf8);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  white-space: nowrap;
 }
 
 .header .time {
   color: #94a3b8;
   font-size: 13px;
+}
+
+.header-line {
+  width: 100%;
+  height: 5px;
+  margin-bottom: 12px;
 }
 
 .kpi-row {
@@ -53,22 +71,27 @@ body {
 }
 
 .kpi-card {
-  height: 88px;
-  padding: 14px 16px;
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid #1e3a5f;
-  border-radius: 8px;
+  height: 96px;
 }
 
-.panel-box {
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid #1e3a5f;
-  border-radius: 8px;
+.kpi-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 10px 12px;
 }
 
 .kpi-label {
   color: #94a3b8;
   font-size: 12px;
+}
+
+.kpi-flop {
+  width: 100%;
+  height: 40px;
+  margin-top: 6px;
 }
 
 .kpi-value {
@@ -86,7 +109,6 @@ body {
 
 .panel {
   min-height: 320px;
-  padding: 8px;
 }
 
 .panel.wide {
@@ -96,6 +118,11 @@ body {
 .panel.full {
   grid-column: 1 / -1;
   min-height: 360px;
+}
+
+.panel-inner {
+  height: 100%;
+  padding: 10px 12px 8px;
 }
 
 .panel-title {
@@ -121,5 +148,11 @@ body {
   }
   .kpi-row {
     grid-template-columns: repeat(3, 1fr);
+  }
+  .header-title {
+    flex-wrap: wrap;
+  }
+  .header-deco {
+    display: none;
   }
 }
