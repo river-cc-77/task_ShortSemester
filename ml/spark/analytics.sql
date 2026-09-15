@@ -1,27 +1,16 @@
 -- 第二阶段：Spark SQL 多维分析（≥8 个分析维度，含 ≥2 组交叉对比）
+-- 兼容 Spark 3.4 + Hive：DROP + CREATE（不用 CREATE OR REPLACE TABLE）
 -- 依赖 Hive 表：dws_station_hourly / dws_station_daily / dim_station / dim_pile
--- 平台 KPI / 用户活跃由 dws_station_daily 聚合（与 hive_ddl.sql 一致，不依赖 ads_daily_stats）
 --
 -- 用法:
 --   spark-sql -f ml/spark/analytics.sql
---
--- 输出 Parquet 目录（答辩环境写入 HDFS /charging/ads/analytics/...）:
---   analytics_platform_daily
---   analytics_station_rank
---   analytics_hourly_profile
---   analytics_region_stats
---   analytics_pile_status
---   analytics_station_util
---   analytics_user_activity
---   analytics_fault_rate
---   analytics_weekday_weekend      -- 交叉对比 1：工作日 vs 周末
---   analytics_station_hour_matrix  -- 交叉对比 2：电站 × 小时热力
 
 CREATE DATABASE IF NOT EXISTS charging;
 USE charging;
 
 -- 1 平台日 KPI（由 dws_station_daily 聚合）
-CREATE OR REPLACE TABLE analytics_platform_daily
+DROP TABLE IF EXISTS analytics_platform_daily;
+CREATE TABLE analytics_platform_daily
 USING parquet LOCATION '/charging/ads/analytics/platform_daily' AS
 SELECT
     stat_date,
@@ -43,8 +32,9 @@ FROM (
 GROUP BY stat_date
 ORDER BY stat_date;
 
--- 2 电站排行（最近一个有订单的业务日——MAX(stat_date) 会命中当天占位行，未发生的小时恒为 0）
-CREATE OR REPLACE TABLE analytics_station_rank
+-- 2 电站排行
+DROP TABLE IF EXISTS analytics_station_rank;
+CREATE TABLE analytics_station_rank
 USING parquet LOCATION '/charging/ads/analytics/station_rank' AS
 SELECT s.name, d.orders, d.revenue, d.kwh, d.utilization, d.peak_hour, d.fault_rate
 FROM dws_station_daily d
@@ -53,7 +43,8 @@ WHERE d.stat_date = (SELECT MAX(stat_date) FROM dws_station_daily WHERE orders >
 ORDER BY d.revenue DESC;
 
 -- 3 24 小时负荷曲线（近 30 天汇总）
-CREATE OR REPLACE TABLE analytics_hourly_profile
+DROP TABLE IF EXISTS analytics_hourly_profile;
+CREATE TABLE analytics_hourly_profile
 USING parquet LOCATION '/charging/ads/analytics/hourly_profile' AS
 SELECT stat_hour, SUM(kwh) AS kwh, SUM(orders) AS orders
 FROM dws_station_hourly
@@ -61,11 +52,9 @@ WHERE datediff(current_date(), to_date(stat_date)) BETWEEN 0 AND 30
 GROUP BY stat_hour
 ORDER BY stat_hour;
 
--- 4 区域分布（从地址提取区名）
--- 口径对齐 collector/clean.cpp 的 regionFromAddress：
--- "深圳市福田区福中三路" -> "福田区"（去掉市名前缀）；无'区'的地址归 '未知'。
--- 原正则 ([^区]+区) 从串首起匹配，得到的是"深圳市福田区"，与 ads_region_daily.region 对不上。
-CREATE OR REPLACE TABLE analytics_region_stats
+-- 4 区域分布
+DROP TABLE IF EXISTS analytics_region_stats;
+CREATE TABLE analytics_region_stats
 USING parquet LOCATION '/charging/ads/analytics/region_stats' AS
 SELECT
     CASE WHEN address LIKE '%区%'
@@ -82,12 +71,14 @@ GROUP BY CASE WHEN address LIKE '%区%'
               ELSE '未知' END;
 
 -- 5 电桩状态分布
-CREATE OR REPLACE TABLE analytics_pile_status
+DROP TABLE IF EXISTS analytics_pile_status;
+CREATE TABLE analytics_pile_status
 USING parquet LOCATION '/charging/ads/analytics/pile_status' AS
 SELECT status, COUNT(*) AS cnt FROM dim_pile GROUP BY status;
 
 -- 6 电站利用率
-CREATE OR REPLACE TABLE analytics_station_util
+DROP TABLE IF EXISTS analytics_station_util;
+CREATE TABLE analytics_station_util
 USING parquet LOCATION '/charging/ads/analytics/station_util' AS
 SELECT s.name, AVG(d.utilization) AS avg_util, AVG(d.turnover) AS avg_turnover
 FROM dws_station_daily d
@@ -95,8 +86,9 @@ JOIN dim_station s ON s.id = d.station_id
 WHERE datediff(current_date(), to_date(d.stat_date)) BETWEEN 0 AND 30
 GROUP BY s.name;
 
--- 7 用户活跃（按日，由 hourly 表 distinct 近似）
-CREATE OR REPLACE TABLE analytics_user_activity
+-- 7 用户活跃
+DROP TABLE IF EXISTS analytics_user_activity;
+CREATE TABLE analytics_user_activity
 USING parquet LOCATION '/charging/ads/analytics/user_activity' AS
 SELECT
     stat_date,
@@ -107,7 +99,8 @@ GROUP BY stat_date
 ORDER BY stat_date;
 
 -- 8 故障率趋势
-CREATE OR REPLACE TABLE analytics_fault_rate
+DROP TABLE IF EXISTS analytics_fault_rate;
+CREATE TABLE analytics_fault_rate
 USING parquet LOCATION '/charging/ads/analytics/fault_rate' AS
 SELECT s.name, AVG(d.fault_rate) AS fault_rate, AVG(d.busy_ratio) AS busy_ratio
 FROM dws_station_daily d
@@ -116,7 +109,8 @@ WHERE datediff(current_date(), to_date(d.stat_date)) BETWEEN 0 AND 30
 GROUP BY s.name;
 
 -- 交叉对比 1：工作日 vs 周末
-CREATE OR REPLACE TABLE analytics_weekday_weekend
+DROP TABLE IF EXISTS analytics_weekday_weekend;
+CREATE TABLE analytics_weekday_weekend
 USING parquet LOCATION '/charging/ads/analytics/weekday_weekend' AS
 SELECT
     CASE WHEN dayofweek(to_date(stat_date)) IN (1, 7) THEN 'weekend' ELSE 'weekday' END AS day_type,
@@ -127,8 +121,9 @@ FROM dws_station_daily
 WHERE datediff(current_date(), to_date(stat_date)) BETWEEN 0 AND 30
 GROUP BY CASE WHEN dayofweek(to_date(stat_date)) IN (1, 7) THEN 'weekend' ELSE 'weekday' END;
 
--- 交叉对比 2：电站 × 小时（热力矩阵）
-CREATE OR REPLACE TABLE analytics_station_hour_matrix
+-- 交叉对比 2：电站 × 小时
+DROP TABLE IF EXISTS analytics_station_hour_matrix;
+CREATE TABLE analytics_station_hour_matrix
 USING parquet LOCATION '/charging/ads/analytics/station_hour_matrix' AS
 SELECT s.name AS station_name, h.stat_hour, SUM(h.kwh) AS kwh, SUM(h.orders) AS orders
 FROM dws_station_hourly h

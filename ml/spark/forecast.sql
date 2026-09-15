@@ -51,31 +51,37 @@ SELECT
 FROM dim_pile
 GROUP BY station_id;
 
--- 高峰小时（优先日表 peak_hour，否则 orders 最大的 hour）
+-- 高峰小时（Spark 3.4 不支持关联子查询，改用窗口函数，口径同 predict_local.py）
+CREATE OR REPLACE TEMP VIEW feat_peak_daily AS
+SELECT station_id, peak_hour
+FROM (
+    SELECT station_id, peak_hour,
+           ROW_NUMBER() OVER (PARTITION BY station_id ORDER BY stat_date DESC) AS rn
+    FROM dws_station_daily
+    WHERE peak_hour IS NOT NULL
+) t
+WHERE rn = 1;
+
+CREATE OR REPLACE TEMP VIEW hourly_peak_agg AS
+SELECT station_id, stat_hour, AVG(orders) AS avg_orders
+FROM dws_station_hourly
+GROUP BY station_id, stat_hour
+HAVING SUM(orders) > 0;
+
+CREATE OR REPLACE TEMP VIEW feat_peak_hourly AS
+SELECT station_id, stat_hour AS predicted_peak_hour
+FROM (
+    SELECT station_id, stat_hour,
+           ROW_NUMBER() OVER (PARTITION BY station_id ORDER BY avg_orders DESC, stat_hour ASC) AS rn
+    FROM hourly_peak_agg
+) t
+WHERE rn = 1;
+
 CREATE OR REPLACE TEMP VIEW feat_peak AS
-SELECT
-    s.station_id,
-    COALESCE(
-        (
-            SELECT d.peak_hour
-            FROM dws_station_daily d
-            WHERE d.station_id = s.station_id AND d.peak_hour IS NOT NULL
-            ORDER BY d.stat_date DESC
-            LIMIT 1
-        ),
-        (
-            -- 网格里每站每天 24 行恒存在，必须用 HAVING 排除全 0 占位，
-            -- 否则 GROUP BY 一定返回一行，且按 stat_hour ASC 取到 0（误报 00:00 为高峰）
-            SELECT h.stat_hour
-            FROM dws_station_hourly h
-            WHERE h.station_id = s.station_id
-            GROUP BY h.stat_hour
-            HAVING SUM(h.orders) > 0
-            ORDER BY AVG(h.orders) DESC, h.stat_hour ASC
-            LIMIT 1
-        )
-    ) AS predicted_peak_hour
-FROM (SELECT DISTINCT station_id FROM dws_station_hourly) s;
+SELECT s.station_id, COALESCE(d.peak_hour, h.predicted_peak_hour) AS predicted_peak_hour
+FROM (SELECT DISTINCT station_id FROM dws_station_hourly) s
+LEFT JOIN feat_peak_daily d ON d.station_id = s.station_id
+LEFT JOIN feat_peak_hourly h ON h.station_id = s.station_id;
 
 -- 三个 horizon 的目标时刻（以 run_ts 为基准）
 CREATE OR REPLACE TEMP VIEW horizon_targets AS
@@ -88,7 +94,8 @@ UNION ALL
 SELECT '24h', date_format(from_unixtime(unix_timestamp('${run_ts}') + 24 * 3600), 'yyyy-MM-dd HH:00'),
        hour(from_unixtime(unix_timestamp('${run_ts}') + 24 * 3600));
 
-CREATE OR REPLACE TABLE ads_load_forecast_result
+DROP TABLE IF EXISTS ads_load_forecast_result;
+CREATE TABLE ads_load_forecast_result
 USING parquet
 LOCATION '/charging/ads/load_forecast_result'
 AS
@@ -107,7 +114,8 @@ CROSS JOIN horizon_targets t
 LEFT JOIN feat_wma w ON w.station_id = s.id AND w.stat_hour = t.target_hour
 LEFT JOIN dim_pile_agg p ON p.station_id = s.id;
 
-CREATE OR REPLACE TABLE ads_time_forecast_result
+DROP TABLE IF EXISTS ads_time_forecast_result;
+CREATE TABLE ads_time_forecast_result
 USING parquet
 LOCATION '/charging/ads/time_forecast_result'
 AS
