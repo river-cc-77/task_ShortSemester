@@ -100,6 +100,37 @@ python3 tools/test_dashboard.py
 - `/api/load_forecast` / `/api/time_forecast` — ML 预测
 - `/api/ml_evaluation` — 模型评估指标
 
+## 测试用例（3×8 = 24 条）
+
+与第一阶段 `tools/test_integration.py` 对齐，第二阶段用例见：
+
+- 用例表：`tools/testcase_catalog_phase2.py`（可复制到 `04测试用例-第二阶段.xls`）
+- 自动化：`python3 tools/test_integration_phase2.py --with-dashboard --with-hdfs`
+
+| 功能点 | 编号 | 内容 |
+|--------|------|------|
+| ML 预测与评估 | TC-P2-01～08 | ads_*、forecast 表、evaluation.json |
+| Dashboard API | TC-P2-09～16 | Flask `/api/*` 黑盒 |
+| Hadoop/Spark 链路 | TC-P2-17～24 | HDFS 镜像、PySpark 10 维、HDFS 远程 |
+
+## 数据集提交
+
+```bash
+# 1. 确保流水线跑通
+bash ml/run_pipeline.sh --generate 3000
+python3 ml/export_to_hdfs.py --clean --upload   # 答辩机
+
+# 2. 打包提交物（zip，不含 charge.db）
+bash ml/package_dataset.sh
+# 答辩机一并上传 HDFS:
+bash ml/package_dataset.sh --upload
+
+# 3. 校验
+python3 tools/test_integration_phase2.py --with-dashboard --with-hdfs
+```
+
+提交内容：`ml/delivery/phase2_dataset_YYYYMMDD.zip`（内含 `hdfs/charging/` CSV 镜像、`output/evaluation.json`、PySpark 分析目录）。
+
 ## 模型评估说明
 
 `ml/evaluate.py` 对最近 N 日做**留一日前向验证**：仅用测试日之前的历史同 hour 做 WMA，与当日实际 `kwh` / `duration_min` 对比，输出 MAE、RMSE、MAPE 到 `ml/output/evaluation.json`，大屏底部展示。
