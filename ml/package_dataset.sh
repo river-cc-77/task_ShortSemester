@@ -1,41 +1,107 @@
 #!/usr/bin/env bash
-# 打包第二阶段答辩/提交用数据集（不含 charge.db 全库，仅分析层镜像 + ML 产出）
+# 打包第二阶段答辩/提交用数据集
 #
 # 用法:
-#   bash ml/package_dataset.sh
-#   bash ml/package_dataset.sh --upload   # 额外上传到 HDFS（需 HDFS_URI）
+#   bash ml/package_dataset.sh              # 处理后：ads 镜像 + ML 产出（默认）
+#   bash ml/package_dataset.sh --raw        # 原始：业务表 CSV + charge.db（未跑 collector）
+#   bash ml/package_dataset.sh --upload     # 额外上传到 HDFS（需 HDFS_URI，仅默认模式）
 #
-# 产出: ml/delivery/phase2_dataset_YYYYMMDD.zip
+# 产出:
+#   ml/delivery/phase2_dataset_YYYYMMDD.zip
+#   ml/delivery/phase2_raw_dataset_YYYYMMDD.zip
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-STAMP="$(date +%Y%m%d)"
-OUT_DIR="ml/delivery/phase2_dataset_${STAMP}"
-ZIP="ml/delivery/phase2_dataset_${STAMP}.zip"
+RAW=0
+UPLOAD=0
+for arg in "$@"; do
+    case "$arg" in
+        --raw) RAW=1 ;;
+        --upload) UPLOAD=1 ;;
+        *) echo "未知参数: $arg"; exit 1 ;;
+    esac
+done
 
-echo ">>> 检查前置数据..."
-python3 ml/verify.py
-test -d ml/data/hdfs/charging || { echo "缺少 ml/data/hdfs，请先: python3 ml/export_to_hdfs.py"; exit 1; }
+STAMP="$(date +%Y%m%d)"
+if [[ "$RAW" == "1" ]]; then
+    OUT_DIR="ml/delivery/phase2_raw_dataset_${STAMP}"
+    ZIP="ml/delivery/phase2_raw_dataset_${STAMP}.zip"
+else
+    OUT_DIR="ml/delivery/phase2_dataset_${STAMP}"
+    ZIP="ml/delivery/phase2_dataset_${STAMP}.zip"
+fi
+
+if [[ "$RAW" == "1" ]]; then
+    echo ">>> 导出原始业务数据（未经过 collector 清洗）..."
+    python3 ml/export_raw_dataset.py --clean --copy-db
+    test -d ml/data/raw/charging || { echo "缺少 ml/data/raw，export_raw_dataset 失败"; exit 1; }
+    ORDER_ROWS="$(python3 - <<'PY'
+import csv
+from pathlib import Path
+p = Path("ml/data/raw/charging/ods/charge_order/charge_order.csv")
+print(max(sum(1 for _ in p.open(encoding="utf-8")) - 1, 0) if p.is_file() else 0)
+PY
+)"
+    if [[ "$ORDER_ROWS" == "0" ]]; then
+        echo "[!] charge_order 为空，建议先: python3 ml/generate_orders.py 3000"
+        exit 1
+    fi
+else
+    echo ">>> 检查前置数据（处理后数据集）..."
+    python3 ml/verify.py
+    test -d ml/data/hdfs/charging || { echo "缺少 ml/data/hdfs，请先: python3 ml/export_to_hdfs.py"; exit 1; }
+fi
 
 echo ">>> 组装目录 $OUT_DIR"
 rm -rf "$OUT_DIR"
-mkdir -p "$OUT_DIR/hdfs" "$OUT_DIR/output" "$OUT_DIR/docs"
+mkdir -p "$OUT_DIR/docs"
 
-cp -r ml/data/hdfs/charging "$OUT_DIR/hdfs/"
-cp -f ml/output/evaluation.json "$OUT_DIR/output/" 2>/dev/null || true
-cp -f ml/output/load_forecast.csv "$OUT_DIR/output/" 2>/dev/null || true
-cp -f ml/output/time_forecast.csv "$OUT_DIR/output/" 2>/dev/null || true
-if [ -d ml/output/analytics ]; then
-  cp -r ml/output/analytics "$OUT_DIR/output/"
-fi
+if [[ "$RAW" == "1" ]]; then
+    mkdir -p "$OUT_DIR/raw"
+    cp -r ml/data/raw/charging "$OUT_DIR/raw/"
+    cp -f ml/data/raw/charge.db "$OUT_DIR/" 2>/dev/null || true
+    cp -f ml/data/raw/schema.sql "$OUT_DIR/" 2>/dev/null || true
+    cp -f ml/data/raw/seed.sql "$OUT_DIR/" 2>/dev/null || true
 
-cat > "$OUT_DIR/README.txt" <<EOF
+    cat > "$OUT_DIR/README.txt" <<EOF
+东软充电桩 — 第二阶段原始数据集 (${STAMP})
+
+说明: 本包为**未经过 collector 清洗**的业务原始数据，供 Hadoop/Spark 答辩演示「采集→清洗→分析」全链路。
+
+目录说明:
+  raw/charging/ods/   原始事实表（charge_order、user、wallet_log）
+  raw/charging/dim/   维表（station、pile）
+  charge.db           SQLite 全库快照（含业务表，不含 ads_* 时可先不跑 collector）
+  schema.sql / seed.sql  建库脚本
+
+再生步骤（仅造原始数据，不跑 collector）:
+  cd db && sqlite3 charge.db < schema.sql && sqlite3 charge.db < seed.sql && cd ..
+  python3 ml/generate_orders.py 3000
+  python3 ml/export_raw_dataset.py --clean --copy-db
+  bash ml/package_dataset.sh --raw
+
+后续处理（答辩现场演示）:
+  cd collector && ./ads-collector    # 清洗 → ads_*
+  bash ml/run_pipeline.sh            # 预测 + 分析
+EOF
+else
+    mkdir -p "$OUT_DIR/hdfs" "$OUT_DIR/output"
+
+    cp -r ml/data/hdfs/charging "$OUT_DIR/hdfs/"
+    cp -f ml/output/evaluation.json "$OUT_DIR/output/" 2>/dev/null || true
+    cp -f ml/output/load_forecast.csv "$OUT_DIR/output/" 2>/dev/null || true
+    cp -f ml/output/time_forecast.csv "$OUT_DIR/output/" 2>/dev/null || true
+    if [ -d ml/output/analytics ]; then
+      cp -r ml/output/analytics "$OUT_DIR/output/"
+    fi
+
+    cat > "$OUT_DIR/README.txt" <<EOF
 东软充电桩 — 第二阶段提交数据集 (${STAMP})
 
 目录说明:
-  hdfs/charging/     HDFS 本地镜像（dws + dim 四层 CSV）
+  hdfs/charging/     HDFS 本地镜像（dws + dim 四层 CSV，collector 清洗后）
   output/            ML 预测 CSV + evaluation.json + PySpark 分析维度
   docs/              测试用例说明
 
@@ -45,7 +111,11 @@ cat > "$OUT_DIR/README.txt" <<EOF
 
 校验:
   python3 tools/test_integration_phase2.py --with-dashboard --with-hdfs
+
+原始数据包（未清洗）:
+  bash ml/package_dataset.sh --raw
 EOF
+fi
 
 cp docs/phase2.md "$OUT_DIR/docs/" 2>/dev/null || true
 cp tools/testcase_catalog_phase2.py "$OUT_DIR/docs/"
@@ -57,7 +127,11 @@ rm -f "$ZIP"
 echo ">>> 完成: $ZIP"
 ls -lh "$ZIP"
 
-if [[ "${1:-}" == "--upload" ]]; then
+if [[ "$UPLOAD" == "1" ]]; then
+    if [[ "$RAW" == "1" ]]; then
+        echo "[!] --upload 仅适用于默认（处理后）数据集，原始包请手动 hdfs dfs -put raw/"
+        exit 1
+    fi
   export HDFS_URI="${HDFS_URI:-$(hdfs getconf -confKey fs.defaultFS 2>/dev/null || true)}"
   if [[ -z "${HDFS_URI}" ]]; then
     echo "[!] 未设置 HDFS_URI，跳过上传"

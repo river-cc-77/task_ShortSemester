@@ -115,21 +115,29 @@ python3 tools/test_dashboard.py
 
 ## 数据集提交
 
+### A. 原始数据（未清洗，推荐答辩演示「采集→处理」）
+
 ```bash
-# 1. 确保流水线跑通
+cd db && sqlite3 charge.db < schema.sql && sqlite3 charge.db < seed.sql && cd ..
+python3 ml/generate_orders.py 3000          # 只造业务订单，不跑 collector
+python3 ml/export_raw_dataset.py --clean --copy-db
+bash ml/package_dataset.sh --raw
+```
+
+提交内容：`ml/delivery/phase2_raw_dataset_YYYYMMDD.zip`  
+内含 `charge.db`、`schema.sql`、`raw/charging/ods/`（charge_order 等原始表 CSV）。
+
+### B. 处理后数据（collector + ML 全链路结果）
+
+```bash
 bash ml/run_pipeline.sh --generate 3000
 python3 ml/export_to_hdfs.py --clean --upload   # 答辩机
-
-# 2. 打包提交物（zip，不含 charge.db）
 bash ml/package_dataset.sh
-# 答辩机一并上传 HDFS:
-bash ml/package_dataset.sh --upload
-
-# 3. 校验
+bash ml/package_dataset.sh --upload             # 答辩机上传 HDFS
 python3 tools/test_integration_phase2.py --with-dashboard --with-hdfs
 ```
 
-提交内容：`ml/delivery/phase2_dataset_YYYYMMDD.zip`（内含 `hdfs/charging/` CSV 镜像、`output/evaluation.json`、PySpark 分析目录）。
+提交内容：`ml/delivery/phase2_dataset_YYYYMMDD.zip`（`hdfs/charging/` ads 镜像 + `output/` ML 产出）。
 
 ## 模型评估说明
 
