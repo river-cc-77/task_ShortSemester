@@ -104,7 +104,7 @@ python3 tools/test_dashboard.py
 
 与第一阶段 `tools/test_integration.py` 对齐，第二阶段用例见：
 
-- 用例表：`tools/testcase_catalog_phase2.py`（可复制到 `04测试用例-第二阶段.xls`）
+- 用例表：`python3 tools/export_testcase_phase2_xlsx.py` → `04测试用例-第二阶段.xls`（版式对齐第一阶段 `03测试用例.xls`）
 - 自动化：`python3 tools/test_integration_phase2.py --with-dashboard --with-hdfs`
 
 | 功能点 | 编号 | 内容 |
